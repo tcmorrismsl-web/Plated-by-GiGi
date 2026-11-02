@@ -4,12 +4,12 @@
 // only the family's Google accounts.
 window.PLATED_CONFIG = {
   firebase: {
-    apiKey: "PASTE_FROM_FIREBASE",
-    authDomain: "PASTE_FROM_FIREBASE",
-    projectId: "PASTE_FROM_FIREBASE",
-    storageBucket: "PASTE_FROM_FIREBASE",
-    messagingSenderId: "PASTE_FROM_FIREBASE",
-    appId: "PASTE_FROM_FIREBASE"
+    apiKey: "AIzaSyBCCjWYVImenpP6E2LKhEYp07O4JMtFKjA",
+    authDomain: "plated-by-gigi.firebaseapp.com",
+    projectId: "plated-by-gigi",
+    storageBucket: "plated-by-gigi.firebasestorage.app",
+    messagingSenderId: "526953969964",
+    appId: "1:526953969964:web:0003472c9604573468d489"
   },
   // Everyone signed in shares this one recipe box and grocery list.
   household: "gigi",
