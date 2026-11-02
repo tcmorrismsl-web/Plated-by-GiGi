@@ -209,3 +209,31 @@ textarea.in{resize:vertical;line-height:1.5}
 .kv{display:flex;flex-direction:column;gap:2px;font-size:.92rem}
 .kv b{font-weight:600}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em;background:var(--surface-2);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+
+/* Recipe facts: serves, times, pan */
+.facts{display:flex;flex-wrap:wrap;gap:10px 28px;margin:6px 0 0}
+.facts div{display:flex;flex-direction:column;gap:1px;min-width:0}
+.facts dt{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.facts dd{margin:0;font-weight:700;font-size:1.05rem;font-variant-numeric:tabular-nums;color:var(--ink)}
+
+/* Review sheet: details block and one row per ingredient / step */
+.details{background:var(--surface-2);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.details .in{font-weight:700;background:var(--surface)}
+.details label.f{color:var(--ink);font-weight:700}
+#d-title{font-size:1.15rem}
+.rsec{display:flex;flex-direction:column;gap:8px}
+.rsec > h3{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.ledit{display:flex;flex-direction:column;gap:6px}
+.lrow{display:grid;grid-template-columns:1.5rem minmax(0,1fr) 28px;gap:8px;align-items:start}
+.lnum{font-family:var(--f-display);color:var(--accent);text-align:right;padding-top:8px;font-size:1.1rem;line-height:1.2}
+.lnum.bul{color:var(--muted);font-family:var(--f-body)}
+.lrow .x{margin-top:8px}
+textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-sizing:content}
+.addline{align-self:flex-start;margin-left:2rem}
+
+/* Keep the header on one line on phones */
+@media (max-width:480px){
+  .top .wrap{gap:10px}
+  .brand span{display:none}
+  .tab{padding:6px 11px}
+}

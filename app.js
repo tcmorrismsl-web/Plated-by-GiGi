@@ -31,6 +31,8 @@ function add(el, c){
   if (Array.isArray(c)) { c.forEach(x => add(el, x)); return; }
   el.appendChild(c instanceof Node ? c : document.createTextNode(String(c)));
 }
+function put(el){ for (let i = 1; i < arguments.length; i++) add(el, arguments[i]); }
+function grow(el){ el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
 const $ = s => document.querySelector(s);
 const clone = o => JSON.parse(JSON.stringify(o));
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -220,7 +222,7 @@ function totalAmount(parts){
 /* ---------- grocery helpers ---------- */
 const DESCRIPTORS = /\b(fresh|freshly|large|medium|small|extra|finely|roughly|coarsely|thinly|chopped|diced|minced|sliced|softened|melted|cold|warm|room[- ]temperature|packed|divided|lightly|beaten|peeled|trimmed|rinsed|drained|halved|cubed|grated|zested|juiced)\b/gi;
 function cleanName(item){
-  return item.replace(/\([^)]*\)/g, "").replace(DESCRIPTORS, "").replace(/\s{2,}/g, " ").replace(/^[\s,-]+|[\s,-]+$/g, "").trim() || item.trim();
+  return item.replace(/^\s*optional\s*:?\s*/i, "").replace(/\([^)]*\)/g, "").replace(DESCRIPTORS, "").replace(/\s{2,}/g, " ").replace(/^[\s,-]+|[\s,-]+$/g, "").trim() || item.trim();
 }
 function keyOf(item){
   const k = cleanName(item).toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
@@ -397,7 +399,8 @@ function addRecipeToList(recipe, factor, label){
     const key = keyOf(p.item);
     let it = g.items.find(x => x.key === key);
     if (!it){
-      it = {id: uid(), key, name: cap(cleanName(p.item)), category: CATS.includes(ing.category) ? ing.category : categorize(p.item), parts: [], status: isStaple(p.item) ? "have" : "need", got:false};
+      const optional = /^\s*optional\b|\(optional\)|,\s*optional\b/i.test(ing.line);
+      it = {id: uid(), key, name: cap(cleanName(p.item)), category: CATS.includes(ing.category) ? ing.category : categorize(p.item), parts: [], status: isStaple(p.item) || optional ? "have" : "need", got:false};
       g.items.push(it);
     }
     it.parts.push({rid: recipe.id, title: recipe.title, qty: p.qty == null ? null : p.qty * factor, unit: p.unit || ""});
@@ -456,6 +459,7 @@ function render(){
     else app.append(viewBox());
     renderSheet();
   });
+  document.querySelectorAll("textarea.auto").forEach(grow);
 }
 
 /* ---------- view: sign-in / setup ---------- */
@@ -488,18 +492,18 @@ function viewDenied(){
 /* ---------- view: recipe box ---------- */
 function viewBox(){
   const f = document.createDocumentFragment();
-  if (S.mode === "local") f.append(h("div", {class:"banner"}, "These recipes are saved in this browser only, not shared."));
-  if (S.dbError) f.append(h("div", {class:"banner"}, S.dbError));
+  if (S.mode === "local") put(f, h("div", {class:"banner"}, "These recipes are saved in this browser only, not shared."));
+  if (S.dbError) put(f, h("div", {class:"banner"}, S.dbError));
   const q = S.q.trim().toLowerCase();
   const list = S.recipes.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .filter(r => !q || (r.title || "").toLowerCase().includes(q) || (r.ingredients || []).some(i => i.line.toLowerCase().includes(q)));
-  f.append(h("div", {class:"boxhead"},
+  put(f, h("div", {class:"boxhead"},
     h("h1", null, "Recipe box"),
     S.recipes.length ? h("input", {class:"search", id:"q", type:"search", placeholder:"Search recipes or ingredients", value:S.q, "aria-label":"Search recipes", oninput:e => { S.q = e.target.value; render(); }}) : null,
     h("button", {class:"btn primary", type:"button", onclick:() => openSheet()}, "+ Add a recipe")
   ));
   if (!S.recipes.length){
-    f.append(h("div", {class:"empty"},
+    put(f, h("div", {class:"empty"},
       h("h2", null, "No recipes yet"),
       h("p", null, "Add one from a website, a photo of a handwritten card, or a chat with an AI. Or load three example recipes to see how scaling and the grocery list work. You can delete them anytime."),
       h("div", {class:"row"},
@@ -512,19 +516,19 @@ function viewBox(){
   const grid = h("div", {class:"grid"});
   for (const r of list){
     const ings = (r.ingredients || []).filter(i => { const p = parseLine(i.line); return p && !p.header; }).length;
-    grid.append(h("button", {class:"rcard", type:"button", onclick:() => go("r-" + r.id)},
+    put(grid, h("button", {class:"rcard", type:"button", onclick:() => go("r-" + r.id)},
       h("div", {class:"hd"},
         h("div", {class:"chips"}, h("span", {class:"chip"}, SOURCES[r.source] || "Recipe"), r.example ? h("span", {class:"chip ex"}, "Example") : null, onList.has(r.id) ? h("span", {class:"chip on"}, "On list") : null),
         h("div", {class:"tt"}, r.title || "Untitled recipe")),
       h("div", {class:"ruled"},
-        h("div", null, r.pan ? panName(r.pan) : (r.servings ? "Serves " + r.servings : "No pan size set")),
-        h("div", null, ings + " ingredients · " + (r.steps || []).length + " steps"),
-        h("div", null, r.pan && r.servings ? "Serves " + r.servings : " "))
+        h("div", null, [servesText(r) ? "Serves " + servesText(r) : "", timeText(r)].filter(Boolean).join(" · ") || " "),
+        h("div", null, r.pan ? panName(r.pan) : "No pan size set"),
+        h("div", null, ings + " ingredients · " + (r.steps || []).length + " steps"))
     ));
   }
-  if (!q) grid.append(h("button", {class:"addcard", type:"button", onclick:() => openSheet()}, h("span", {class:"plus"}, "+"), "Add a recipe"));
-  if (!list.length) f.append(h("p", {class:"note"}, "No recipes match “" + S.q + "”."));
-  f.append(grid);
+  if (!q) put(grid, h("button", {class:"addcard", type:"button", onclick:() => openSheet()}, h("span", {class:"plus"}, "+"), "Add a recipe"));
+  if (!list.length) put(f, h("p", {class:"note"}, "No recipes match “" + S.q + "”."));
+  put(f, grid);
   return f;
 }
 function loadExamples(){
@@ -547,20 +551,22 @@ function factorOf(r, sc){
   if (sc.mode === "servings" && r.servings) return (+sc.servings || r.servings) / r.servings;
   return +sc.mult > 0 ? +sc.mult : 1;
 }
+function servesText(r){ return r.serves || (r.servings ? String(r.servings) : ""); }
+function timeText(r){ return r.totalTime || r.cookTime || ""; }
 function fmtFactor(f){ const r = Math.round(f * 100) / 100; return "×" + (Number.isInteger(r) ? r : r.toFixed(2).replace(/0$/, "")); }
 function viewRecipe(){
   const r = S.recipes.find(x => x.id === S.rid);
   const f = document.createDocumentFragment();
-  f.append(h("div", {class:"back"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => go("recipes")}, "← Recipe box")));
-  if (!r){ f.append(h("div", {class:"empty"}, h("h2", null, "Recipe not found"), h("p", null, "It may have been deleted."), h("button", {class:"btn", type:"button", onclick:() => go("recipes")}, "Back to the recipe box"))); return f; }
+  put(f, h("div", {class:"back"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => go("recipes")}, "← Recipe box")));
+  if (!r){ put(f, h("div", {class:"empty"}, h("h2", null, "Recipe not found"), h("p", null, "It may have been deleted."), h("button", {class:"btn", type:"button", onclick:() => go("recipes")}, "Back to the recipe box"))); return f; }
   if (!S.scale) S.scale = defaultScale(r);
   const sc = S.scale, factor = factorOf(r, sc);
   const onList = S.grocery.recipes.find(x => x.rid === r.id);
-  const meta = h("div", {class:"meta"},
-    r.pan ? h("span", null, "Original pan: " + panName(r.pan)) : null,
-    r.servings ? h("span", null, "Serves " + r.servings) : null,
-    r.url ? h("a", {href:r.url, target:"_blank", rel:"noopener"}, "Source ↗") : null);
-  f.append(h("section", {class:"dhead"},
+  const facts = [["Serves", servesText(r)], ["Prep", r.prepTime], ["Cook", r.cookTime], ["Total", r.totalTime], ["Pan", r.pan ? panName(r.pan) : ""]].filter(x => x[1]);
+  const meta = h("div", null,
+    facts.length ? h("dl", {class:"facts"}, facts.map(([k, v]) => h("div", null, h("dt", null, k), h("dd", null, String(v))))) : null,
+    r.url ? h("div", {class:"meta", style:"margin-top:8px"}, h("a", {href:r.url, target:"_blank", rel:"noopener"}, "Source ↗")) : null);
+  put(f, h("section", {class:"dhead"},
     h("div", {class:"hd"},
       h("div", {class:"chips"}, h("span", {class:"chip"}, SOURCES[r.source] || "Recipe"), r.example ? h("span", {class:"chip ex"}, "Example") : null),
       h("h1", null, r.title || "Untitled recipe"), meta),
@@ -582,37 +588,37 @@ function viewRecipe(){
   const right = h("div", {class:"sect"}, h("h2", null, "Method"),
     (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map(s => h("li", null, h("span", null, s)))) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
     r.notes ? h("div", {class:"notes"}, r.notes) : null);
-  f.append(h("div", {class:"cols"}, left, right));
+  put(f, h("div", {class:"cols"}, left, right));
   return f;
 }
 function scaler(r, sc, factor){
   const set = patch => { Object.assign(S.scale, patch); render(); };
   const modes = [["pan", "By pan"]]; if (r.servings) modes.push(["servings", "By servings"]); modes.push(["mult", "Multiply"]);
   const body = h("div", {class:"scalebody"});
-  body.append(h("div", {class:"seg", role:"group", "aria-label":"Scale by"}, modes.map(([m, l]) => h("button", {type:"button", "aria-pressed": String(sc.mode === m), onclick:() => set({mode:m})}, l))));
+  put(body, h("div", {class:"seg", role:"group", "aria-label":"Scale by"}, modes.map(([m, l]) => h("button", {type:"button", "aria-pressed": String(sc.mode === m), onclick:() => set({mode:m})}, l))));
   if (sc.mode === "pan"){
     if (!r.pan){
-      body.append(h("p", {class:"note"}, "This recipe doesn't have its original pan size yet."), h("div", null, h("button", {class:"btn sm", type:"button", onclick:() => openSheet(r)}, "Set the original pan")));
+      put(body, h("p", {class:"note"}, "This recipe doesn't have its original pan size yet."), h("div", null, h("button", {class:"btn sm", type:"button", onclick:() => openSheet(r)}, "Set the original pan")));
     } else {
       const sel = h("select", {class:"in", id:"sc-pan", onchange:e => { const v = e.target.value; const p = panByKey(v); set(p ? {k:v, shape:p.shape, a:p.a, b:p.b} : {k:"custom"}); }},
         PANS.map(p => h("option", {value:p.k, selected: sc.k === p.k}, p.label)), h("option", {value:"custom", selected: sc.k === "custom"}, "Other size…"));
       const cnt = h("select", {class:"in", id:"sc-count", onchange:e => set({count:+e.target.value})}, [1,2,3,4].map(n => h("option", {value:n, selected: sc.count === n}, n === 1 ? "1 pan" : n + " pans")));
-      body.append(h("div", {class:"inline"}, h("label", {class:"f", style:"flex:3 1 180px"}, "Your pan", sel), h("label", {class:"f", style:"flex:1 1 90px"}, "How many", cnt)));
-      if (sc.k === "custom") body.append(customDims("sc", sc, set));
+      put(body, h("div", {class:"inline"}, h("label", {class:"f", style:"flex:3 1 180px"}, "Your pan", sel), h("label", {class:"f", style:"flex:1 1 90px"}, "How many", cnt)));
+      if (sc.k === "custom") put(body, customDims("sc", sc, set));
       const o = areaOf(r.pan) * (r.pan.count || 1), t = areaOf(targetPan(sc)) * sc.count;
-      if (o && t) body.append(h("p", {class:"note"}, `${panName(targetPan(sc))} = ${Math.round(t)} sq in · original ${panName(r.pan)} = ${Math.round(o)} sq in. Batter depth stays the same, so start checking at the original bake time.`));
+      if (o && t) put(body, h("p", {class:"note"}, `${panName(targetPan(sc))} = ${Math.round(t)} sq in · original ${panName(r.pan)} = ${Math.round(o)} sq in. Batter depth stays the same, so start checking at the original bake time.`));
     }
   } else if (sc.mode === "servings"){
-    body.append(h("div", {class:"stepper"},
+    put(body, h("div", {class:"stepper"},
       h("button", {class:"btn sm", type:"button", "aria-label":"Fewer servings", onclick:() => set({servings: Math.max(1, (+sc.servings || 1) - 1)})}, "−"),
       h("input", {class:"in", id:"sc-serv", type:"number", min:"1", step:"1", inputmode:"numeric", value:sc.servings, onchange:e => set({servings: Math.max(1, +e.target.value || r.servings)})}),
       h("button", {class:"btn sm", type:"button", "aria-label":"More servings", onclick:() => set({servings: (+sc.servings || 0) + 1})}, "+"),
-      h("span", {class:"note"}, "servings (recipe makes " + r.servings + ")")));
+      h("span", {class:"note"}, "servings (recipe makes " + servesText(r) + ")")));
   } else {
-    body.append(h("div", {class:"seg", role:"group", "aria-label":"Multiplier"}, [0.5, 1, 1.5, 2, 3].map(m => h("button", {type:"button", "aria-pressed": String(+sc.mult === m), onclick:() => set({mult:m})}, m === 0.5 ? "½×" : m === 1.5 ? "1½×" : m + "×"))),
+    put(body, h("div", {class:"seg", role:"group", "aria-label":"Multiplier"}, [0.5, 1, 1.5, 2, 3].map(m => h("button", {type:"button", "aria-pressed": String(+sc.mult === m), onclick:() => set({mult:m})}, m === 0.5 ? "½×" : m === 1.5 ? "1½×" : m + "×"))),
       h("label", {class:"f"}, "Or type any amount", h("input", {class:"in", id:"sc-mult", type:"number", min:"0.1", step:"0.05", inputmode:"decimal", value:sc.mult, onchange:e => set({mult: Math.max(0.05, +e.target.value || 1)})})));
   }
-  body.append(h("div", {class:"factor"}, h("b", null, fmtFactor(factor)), h("span", null, factor === 1 ? "the recipe as written" : "of the recipe as written")));
+  put(body, h("div", {class:"factor"}, h("b", null, fmtFactor(factor)), h("span", null, factor === 1 ? "the recipe as written" : "of the recipe as written")));
   return body;
 }
 function customDims(prefix, o, set){
@@ -627,13 +633,13 @@ function ingList(r, factor){
   for (const ing of r.ingredients || []){
     const p = parseLine(ing.line);
     if (!p) continue;
-    if (p.header){ ul.append(h("li", {class:"hdr"}, p.header)); continue; }
+    if (p.header){ put(ul, h("li", {class:"hdr"}, p.header)); continue; }
     const a = amountOf(p, factor), orig = factor !== 1 ? amountOf(p, 1).text : "";
-    ul.append(h("li", null,
+    put(ul, h("li", null,
       h("span", {class:"amt"}, a.text || "—", orig ? h("span", {class:"was"}, "was " + orig) : null),
       h("span", null, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null)));
   }
-  if (!ul.children.length) ul.append(h("li", null, h("span", null, "—"), h("span", {class:"note"}, "No ingredients saved.")));
+  if (!ul.children.length) put(ul, h("li", null, h("span", null, "—"), h("span", {class:"note"}, "No ingredients saved.")));
   return ul;
 }
 
@@ -642,34 +648,34 @@ function viewList(){
   const g = S.grocery, f = document.createDocumentFragment();
   const need = g.items.filter(i => i.status === "need"), have = g.items.filter(i => i.status === "have");
   const got = need.filter(i => i.got).length;
-  f.append(h("div", {class:"ghead"}, h("h1", null, "Grocery list"),
+  put(f, h("div", {class:"ghead"}, h("h1", null, "Grocery list"),
     g.items.length ? h("span", {class:"sum"}, `${need.length} to buy${got ? " · " + got + " in cart" : ""} · ${have.length} on hand`) : null));
   if (!g.items.length){
-    f.append(h("div", {class:"empty"}, h("h2", null, "The list is empty"),
+    put(f, h("div", {class:"empty"}, h("h2", null, "The list is empty"),
       h("p", null, "Open a recipe, scale it to your pan, and tap Add to grocery list. Ingredients from every recipe you add are combined here so you can check what you already have."),
       h("div", {class:"row"}, h("button", {class:"btn primary", type:"button", onclick:() => go("recipes")}, "Go to recipes"))),
       addItemRow());
     return f;
   }
   const main = h("div", null);
-  if (g.recipes.length) main.append(h("div", {class:"rchips"}, g.recipes.map(rc => h("span", {class:"rchip"},
+  if (g.recipes.length) put(main, h("div", {class:"rchips"}, g.recipes.map(rc => h("span", {class:"rchip"},
     h("span", null, rc.title), h("small", null, rc.label || fmtFactor(rc.factor)),
     h("button", {class:"x", type:"button", "aria-label":"Remove " + rc.title + " from the list", onclick:() => { saveGrocery(removeRecipeFromList(clone(S.grocery), rc.rid)); toast("Removed " + rc.title); }}, "×")))));
-  main.append(h("p", {class:"note", style:"margin:0 0 14px"}, "Confirm each item: Need puts it on the export, Have leaves it off. Tick the box when it's in your cart."));
+  put(main, h("p", {class:"note", style:"margin:0 0 14px"}, "Confirm each item: Need puts it on the export, Have leaves it off. Tick the box when it's in your cart."));
   for (const c of CATS){
     const items = g.items.filter(i => (i.category || "Other") === c).sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === "need" ? -1 : 1));
     if (!items.length) continue;
-    main.append(h("section", {class:"dept"}, h("h3", null, c), h("ul", {class:"gl"}, items.map(groceryRow))));
+    put(main, h("section", {class:"dept"}, h("h3", null, c), h("ul", {class:"gl"}, items.map(groceryRow))));
   }
-  main.append(addItemRow());
-  main.append(S.confirmClear
+  put(main, addItemRow());
+  put(main, S.confirmClear
     ? h("div", {class:"confirm"}, "Clear the whole list for both of you?",
         h("button", {class:"btn danger solid sm", type:"button", onclick:() => { S.confirmClear = false; saveGrocery(Object.assign(emptyGrocery(), {store:S.grocery.store})); toast("List cleared"); }}, "Clear list"),
         h("button", {class:"btn sm", type:"button", onclick:() => { S.confirmClear = false; render(); }}, "Cancel"))
     : h("div", {class:"row"},
         got ? h("button", {class:"btn sm", type:"button", onclick:() => { const n = clone(S.grocery); n.items = n.items.filter(i => !(i.status === "need" && i.got)); saveGrocery(n); }}, "Remove items in cart") : null,
         h("button", {class:"btn ghost sm", type:"button", onclick:() => { S.confirmClear = true; render(); }}, "Clear list")));
-  f.append(h("div", {class:"gtop"}, main, exportPanel(need)));
+  put(f, h("div", {class:"gtop"}, main, exportPanel(need)));
   return f;
 }
 function updItem(id, patch){ const g = clone(S.grocery); const it = g.items.find(i => i.id === id); if (it) Object.assign(it, patch); saveGrocery(g); }
@@ -830,10 +836,12 @@ function openSheet(recipe){
 }
 function closeSheet(){ if (S.sheet && S.sheet.ctl) S.sheet.ctl.abort(); ((S.sheet && S.sheet.previews) || []).forEach(u => URL.revokeObjectURL(u)); S.sheet = null; render(); }
 function draftFrom(r){
-  return {title:r.title || "", servings:r.servings || "", pan: r.pan ? clone(r.pan) : null, ingText:(r.ingredients || []).map(i => i.line).join("\n"),
-    stepsText:(r.steps || []).join("\n\n"), notes:r.notes || "", url:r.url || "", cats:Object.fromEntries((r.ingredients || []).map(i => [i.line.trim(), i.category])), example: !!r.example, createdAt:r.createdAt};
+  const ings = (r.ingredients || []).map(i => i.line), steps = (r.steps || []).slice();
+  return {title:r.title || "", serves: servesText(r), prepTime:r.prepTime || "", cookTime:r.cookTime || "", totalTime:r.totalTime || "",
+    pan: r.pan ? clone(r.pan) : null, ings: ings.length ? ings : [""], steps: steps.length ? steps : [""],
+    notes:r.notes || "", url:r.url || "", cats:Object.fromEntries((r.ingredients || []).map(i => [i.line.trim(), i.category])), example: !!r.example, createdAt:r.createdAt};
 }
-function blankDraft(){ return {title:"", servings:"", pan:null, ingText:"", stepsText:"", notes:"", url:"", cats:{}}; }
+function blankDraft(){ return {title:"", serves:"", prepTime:"", cookTime:"", totalTime:"", pan:null, ings:["", "", ""], steps:[""], notes:"", url:"", cats:{}}; }
 function renderSheet(){
   const root = $("#sheetroot"); root.textContent = "";
   const sh = S.sheet; if (!sh) return;
@@ -846,39 +854,39 @@ function renderSheet(){
       ["card", "Recipe card", "Copy the card's words with iPhone Live Text and paste them."],
       ["ai", "AI chat", "Paste a conversation where a recipe was worked out."],
       ["typed", "Type it in", "Write the ingredients and steps yourself."]];
-    body.append(h("div", {class:"kinds"}, kinds.map(([k, t, d]) => h("button", {class:"kind", type:"button", onclick:() => {
+    put(body, h("div", {class:"kinds"}, kinds.map(([k, t, d]) => h("button", {class:"kind", type:"button", onclick:() => {
       if (k === "typed"){ sh.kind = "typed"; sh.step = "review"; sh.draft = blankDraft(); }
       else { sh.kind = k; sh.step = "input"; sh.error = null; }
       render();
     }}, h("span", {html:ICONS[k]}), h("b", null, t), h("span", null, d)))));
-    foot.append(h("button", {class:"btn", type:"button", onclick:closeSheet}, "Cancel"));
+    put(foot, h("button", {class:"btn", type:"button", onclick:closeSheet}, "Cancel"));
   } else if (sh.step === "input") inputStep(sh, body, foot);
   else reviewStep(sh, body, foot);
   const scrim = h("div", {class:"scrim", onclick:e => { if (e.target === scrim && !sh.busy) closeSheet(); }, onkeydown:e => { if (e.key === "Escape" && !sh.busy) closeSheet(); }},
     h("div", {class:"sheet", role:"dialog", "aria-modal":"true", "aria-labelledby":"sheet-title"},
       h("div", {class:"sh"}, h("h2", {id:"sheet-title"}, titles[sh.step] || "Add a recipe"), h("button", {class:"x", type:"button", "aria-label":"Close", onclick:closeSheet}, "×")),
       body, foot));
-  root.append(scrim);
+  put(root, scrim);
 }
 function settingsStep(sh, body, foot){
-  if (S.user) body.append(h("div", {class:"kv"}, h("b", null, "Signed in"), h("span", null, (S.user.displayName ? S.user.displayName + " · " : "") + (S.user.email || ""))),
+  if (S.user) put(body, h("div", {class:"kv"}, h("b", null, "Signed in"), h("span", null, (S.user.displayName ? S.user.displayName + " · " : "") + (S.user.email || ""))),
     h("p", {class:"note"}, "Everyone signed in to Plated shares one recipe box and grocery list."));
-  else body.append(h("div", {class:"kv"}, h("b", null, "This device only"), h("span", {class:"note"}, "Recipes here aren't shared. Connect Firebase in config.js to share them.")));
-  body.append(
+  else put(body, h("div", {class:"kv"}, h("b", null, "This device only"), h("span", {class:"note"}, "Recipes here aren't shared. Connect Firebase in config.js to share them.")));
+  put(body, 
     h("div", {class:"kv"}, h("b", null, "Claude API key"),
       h("span", {class:"note"}, "Lets Plated read recipe card photos and messy recipe pages. Billed to an Anthropic API account (console.anthropic.com), separate from a Claude subscription. The key is saved on this device only; it is never put in the shared recipe box or on GitHub.")),
     h("input", {class:"in", id:"set-key", type:"password", autocomplete:"off", placeholder:"sk-ant-…", value: sh.keyDraft || "", oninput:e => { sh.keyDraft = e.target.value; }}),
     getKey() ? h("p", {class:"note"}, "A key is saved on this device.") : h("p", {class:"note"}, "No key yet. Without one, pasted recipes are split by Plated itself and card photos can't be read."));
-  foot.append(
+  put(foot, 
     S.user ? h("button", {class:"btn ghost", type:"button", onclick:signOut, style:"margin-right:auto"}, "Sign out") : null,
     getKey() ? h("button", {class:"btn", type:"button", onclick:() => { setKey(""); sh.keyDraft = ""; toast("Key removed from this device"); render(); }}, "Remove key") : null,
     h("button", {class:"btn primary", type:"button", onclick:() => { const v = (sh.keyDraft || "").trim(); setKey(v); toast(v ? "Key saved on this device" : "Settings saved"); closeSheet(); }}, "Save"));
 }
 function inputStep(sh, body, foot){
   const hasKey = !!getKey();
-  if (sh.kind === "web") body.append(h("label", {class:"f"}, "Recipe page link (optional, saved as the source)", h("input", {class:"in", id:"in-url", type:"url", placeholder:"https://", value:sh.url || "", oninput:e => { sh.url = e.target.value; }})));
+  if (sh.kind === "web") put(body, h("label", {class:"f"}, "Recipe page link (optional, saved as the source)", h("input", {class:"in", id:"in-url", type:"url", placeholder:"https://", value:sh.url || "", oninput:e => { sh.url = e.target.value; }})));
   if (sh.kind === "card" && !sh.usePhoto){
-    body.append(
+    put(body, 
       h("ol", {class:"how"},
         h("li", null, "Take a photo of the card, or just point the Camera at it."),
         h("li", null, "Tap the Live Text button (the square with lines) in the corner of the photo or camera view."),
@@ -887,7 +895,7 @@ function inputStep(sh, body, foot){
       h("label", {class:"f"}, "Paste the card's text",
         h("textarea", {class:"in", id:"in-text", rows:"10", placeholder:"Grandma's Pound Cake\n2 cups sugar\n1 cup butter\n5 eggs\n…\nCream butter and sugar…", oninput:e => { sh.text = e.target.value; }}, sh.text || "")),
       h("p", {class:"note"}, "Plated sorts the lines into ingredients and steps. Check them on the next screen, especially any words Live Text misread."));
-    if (hasKey) body.append(h("p", {class:"note"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => { sh.usePhoto = true; sh.error = null; render(); }}, "Upload a photo instead (uses your Claude key)")));
+    if (hasKey) put(body, h("p", {class:"note"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => { sh.usePhoto = true; sh.error = null; render(); }}, "Upload a photo instead (uses your Claude key)")));
   } else if (sh.kind === "card"){
     const pick = files => {
       const list = [...files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)).slice(0, 4);
@@ -898,16 +906,16 @@ function inputStep(sh, body, foot){
     const drop = h("label", {class:"drop", ondragover:e => { e.preventDefault(); drop.classList.add("over"); }, ondragleave:() => drop.classList.remove("over"), ondrop:e => { e.preventDefault(); pick(e.dataTransfer.files); }},
       h("b", null, "Add photos of the card"), h("div", null, "Take a photo or pick one. Front and back are fine, up to 4."),
       h("input", {type:"file", id:"in-files", accept:"image/*", multiple:true, onchange:e => pick(e.target.files)}));
-    body.append(drop);
-    if (sh.previews.length) body.append(h("div", {class:"thumbs"}, sh.previews.map((u, i) => h("img", {src:u, alt:"Card photo " + (i + 1)}))));
+    put(body, drop);
+    if (sh.previews.length) put(body, h("div", {class:"thumbs"}, sh.previews.map((u, i) => h("img", {src:u, alt:"Card photo " + (i + 1)}))));
   } else {
-    body.append(h("label", {class:"f"}, sh.kind === "ai" ? "Paste the conversation" : "Paste the recipe from the page",
+    put(body, h("label", {class:"f"}, sh.kind === "ai" ? "Paste the conversation" : "Paste the recipe from the page",
       h("textarea", {class:"in", id:"in-text", rows:"10", placeholder: sh.kind === "ai" ? "Copy the chat (or just the final recipe) and paste it here." : "On the recipe page, select from the title through the last step, copy, and paste here. Extra text like ads or comments is fine.", oninput:e => { sh.text = e.target.value; }}, sh.text || "")));
-    if (!hasKey) body.append(h("p", {class:"note"}, "Plated will split the text into ingredients and steps. Check the result on the next screen. A Claude API key in Settings makes this smarter."));
+    if (!hasKey) put(body, h("p", {class:"note"}, "Plated will split the text into ingredients and steps. Check the result on the next screen. A Claude API key in Settings makes this smarter."));
   }
-  if (sh.error) body.append(h("p", {class:"err"}, sh.error));
-  if (sh.busy) body.append(h("div", {class:"busy"}, h("span", {class:"dot"}), sh.kind === "card" ? "Reading the card… this can take up to a minute." : "Reading the recipe…"));
-  foot.append(
+  if (sh.error) put(body, h("p", {class:"err"}, sh.error));
+  if (sh.busy) put(body, h("div", {class:"busy"}, h("span", {class:"dot"}), sh.kind === "card" ? "Reading the card… this can take up to a minute." : "Reading the recipe…"));
+  put(foot, 
     sh.busy ? h("button", {class:"btn", type:"button", onclick:() => sh.ctl && sh.ctl.abort()}, "Stop") : h("button", {class:"btn", type:"button", onclick:() => { sh.step = "choose"; sh.error = null; render(); }}, "Back"),
     h("button", {class:"btn primary", type:"button", disabled: sh.busy, onclick:() => runExtract(sh)}, sh.kind === "card" && sh.usePhoto ? "Read the card" : "Read the recipe"));
 }
@@ -915,13 +923,15 @@ function extractPrompt(kind, text){
   const what = kind === "card" ? "the attached photo(s) of a recipe card (handwritten or printed)" : kind === "cardtext" ? "text copied from a photo of a recipe card with phone text recognition, which may have line breaks in odd places and a few misread words" : kind === "ai" ? "a conversation with an AI assistant. Use the final version of the recipe the conversation settled on" : "text copied from a recipe web page, which may include ads, stories and comments to ignore";
   return `Extract one recipe from ${what}.
 Reply with only a JSON object in exactly this shape:
-{"title": string, "servings": number or null, "pan": {"shape": "rect" or "round", "width": number, "length": number} or null, "ingredients": [{"line": string, "category": string}], "steps": [string], "notes": string}
+{"title": string, "servings": string like "4" or "2–3" or "", "prepTime": string, "cookTime": string, "totalTime": string, "pan": {"shape": "rect" or "round", "width": number, "length": number} or null, "ingredients": [{"line": string, "category": string}], "steps": [string], "notes": string}
 Rules:
+- "title": the recipe's name. If none is given, write a short descriptive name in title case (2–6 words).
+- "prepTime", "cookTime", "totalTime": short text like "15 min" or "1 hr 10 min" when stated or clearly implied, else "". A single overall time ("about 25 minutes") goes in "totalTime".
 - "pan": only when the recipe names a baking pan or dish size, in inches. For a round pan, width = diameter and length = diameter. A loaf pan is "rect".
 - "ingredients[].line": one ingredient each, written like "2 1/2 cups all-purpose flour, sifted" with the quantity first, then the unit, then the item, then any prep after a comma. Use plain fractions like 1/2 (not ½). Keep amounts exactly as written. For a section heading such as "For the frosting", use a line ending with a colon and category "Other".
 - "category": one of ${CATS.map(c => '"' + c + '"').join(", ")}.
 - "steps": the method in order, one step per item, without step numbers.
-- "notes": tips or source credits worth keeping, else "".
+- "notes": intro tips, variations, substitutions, storage and source credits worth keeping, as short paragraphs separated by a blank line, else "". Never put these in "steps". Leave out greetings and sign-offs.
 - If handwriting is hard to read, give your best reading and put "(?)" right after the uncertain word.
 - If there is no recipe, reply {"error": "no recipe"}.` + (text ? "\n\nHere is the content:\n<<<\n" + text.slice(0, 60000) + "\n>>>" : "");
 }
@@ -946,86 +956,185 @@ async function runExtract(sh){
 }
 function applyDraft(sh, data){
   const ings = (data.ingredients || []).map(i => typeof i === "string" ? {line:i, category:""} : {line:String(i.line || "").trim(), category:i.category}).filter(i => i.line);
+  const steps = (data.steps || []).map(s => String(s).trim()).filter(Boolean);
+  const str = v => v == null ? "" : String(v).trim();
   sh.draft = {
-    title: String(data.title || "").trim(), servings: data.servings && +data.servings > 0 ? +data.servings : "",
-    pan: panFromDims(data.pan), ingText: ings.map(i => i.line).join("\n"),
-    stepsText: (data.steps || []).map(s => String(s).trim()).filter(Boolean).join("\n\n"),
-    notes: String(data.notes || "").trim(), url: sh.url || "", cats: Object.fromEntries(ings.map(i => [i.line, i.category]))
+    title: str(data.title), serves: str(data.serves || data.servings).replace(/\s*(?:-|to)\s*/, "–"),
+    prepTime: str(data.prepTime), cookTime: str(data.cookTime), totalTime: str(data.totalTime),
+    pan: panFromDims(data.pan), ings: ings.length ? ings.map(i => i.line) : [""], steps: steps.length ? steps : [""],
+    notes: str(data.notes), url: sh.url || "", cats: Object.fromEntries(ings.map(i => [i.line, i.category]))
   };
   sh.step = "review"; render();
 }
 /* Built-in splitter, used when there's no Claude key */
-const STEP_VERB = /^(cream|mix|stir|bake|combine|add|beat|whisk|pour|preheat|heat|cook|place|put|fold|blend|sift|grease|melt|let|cool|chill|serve|bring|simmer|boil|cut|chop|spread|roll|cover|remove|season|sprinkle|top|layer|drain|transfer|line|turn|reduce|fry|saut(e|é)|brown|knead|in a|in another)\b/i;
+const STEP_VERB = /^(cream|mix|stir|bake|combine|add|beat|whisk|pour|preheat|heat|cook|place|put|fold|blend|sift|grease|melt|let|cool|chill|serve|bring|simmer|boil|cut|chop|spread|roll|cover|remove|season|sprinkle|top|layer|drain|transfer|line|turn|reduce|fry|saut(e|é)|brown|knead|adjust|taste|toss|slice|dice|mince|garnish|finish|return|meanwhile|once|when|after|while|in a|in another)\b/i;
+const NOTE_START = /^(if (?!using\b)|tips?\b|notes?\b|variations?\b|swaps?\b|substitut|make[- ]ahead|leftovers?\b|storage\b|to store\b|store (it|leftovers)\b|serving suggestions?\b|serve (it )?with\b|pair (it )?with\b|for (a|an|extra|more|added|less|a lighter|a spicier)\b|to make (it|this)\b|want\b|craving\b|you can also\b|feel free\b|bonus\b|shortcut\b|optional:)/i;
+const CHATTY = /^(sure|here('s| is| are)|okay|ok\b|great|absolutely|of course|certainly|enjoy|let me know|i hope|hope you|happy (cooking|baking)|would you like|want me to|good luck|bon app)/i;
+const DUR = "(\\d+(?:[½¼¾]|\\.\\d+)?(?:\\s*(?:–|-|to)\\s*\\d+)?\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s*(?:and\\s*)?\\d+\\s*(?:minutes?|mins?))?)";
+function normTime(t){ return t.replace(/\bminutes?\b|\bmins\b/gi, "min").replace(/\bhours?\b|\bhrs\b/gi, "hr").replace(/\s*(?:-|to)\s*(?=\d)/, "–").replace(/\s+/g, " ").trim(); }
+function findTimes(all, intro){
+  const grab = (re, txt) => { const m = (txt || all).match(re); return m ? normTime(m[1]) : ""; };
+  const t = {
+    prep: grab(new RegExp("\\bprep(?:aration)?(?:\\s*time)?\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i")),
+    cook: grab(new RegExp("\\b(?:cook(?:ing)?|bake|baking)\\s*time\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i")),
+    total: grab(new RegExp("\\btotal(?:\\s*time)?\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i"))
+  };
+  if (!t.total && !t.cook) t.total = grab(new RegExp("\\b(?:about|around|roughly|takes|ready in|in about|in under|under|just)\\s+" + DUR, "i"), intro);
+  if (t.total && /^\d/.test(t.total) && /^(about|around|roughly)/i.test(((intro || "").match(new RegExp("\\b(about|around|roughly)\\s+" + DUR, "i")) || [""])[0])) t.total = "About " + t.total;
+  return t;
+}
+function findServings(txt){
+  const m = txt.match(/\b(?:serves|servings?|yields?|makes|feeds)\b\s*[:\-–]?\s*(?:about\s*)?(\d+(?:\s*(?:–|-|to)\s*\d+)?)/i);
+  return m ? m[1].replace(/\s*(?:–|-|to)\s*/, "–") : "";
+}
+const SMALL_WORDS = new Set(["a","an","and","or","with","of","the","in","on","for","to","over","at","from","by","&"]);
+function titleCase(t){ return t.split(/\s+/).map((w, i) => i > 0 && SMALL_WORDS.has(w.toLowerCase()) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(" "); }
+function titleFromSentence(sentence){
+  const res = [
+    /\b(?:i'?d|i would|i'?ll|let'?s|we could|you could|you can) (?:make|go with|try|suggest|whip up|cook up|do)\s+(.+)/i,
+    /\b(?:how about|why not try|why not make|try making|try)\s+(.+)/i,
+    /\brecipe for\s+(.+)/i,
+    /^(?:make|making)\s+(.+)/i
+  ];
+  for (const re of res){
+    const m = sentence.match(re); if (!m) continue;
+    let t = m[1].split(/[!.:;?]|,\s(?:which|it|and it|so)\b|\s[–—]\s/)[0]
+      .replace(/^(a|an|some|this|my|the|your|a quick|an easy|a simple|a cozy)\s+/i, "")
+      .replace(/\s+(tonight|today|this week|for dinner|for lunch|for breakfast)$/i, "").trim();
+    if (!t || t.length < 3 || /\b(recipe|you|something|it)\b/i.test(t) || t.split(/\s+/).length > 9) continue;
+    return titleCase(t);
+  }
+  return "";
+}
+const sentencesOf = txt => txt.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/).map(x => x.trim()).filter(Boolean);
 function localExtract(text){
   const BULLET = /^[-–•*·▢☐□✓✔]\s*/;
-  let title = "", mdTitle = "", servings = null, mode = null;
-  const ings = [], steps = [], notes = [];
-  for (const rawLine of String(text || "").split(/\r?\n/)){
+  const src = String(text || "").replace(/[‘’]/g, "'");
+  let title = "", mdTitle = "", mode = null;
+  const ings = [], steps = [], notes = [], intro = [], meta = [];
+  for (const rawLine of src.split(/\r?\n/)){
     const isHeading = /^\s*#{1,6}\s/.test(rawLine) || /^\s*(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/.test(rawLine);
     const l = rawLine.replace(/^\s*>+\s?/, "").replace(/^\s*#{1,6}\s*/, "").replace(/\*\*|__|`/g, "").trim();
     if (!l || /^[-*_=]{3,}$/.test(l)) continue;
-    const low = l.toLowerCase().replace(/[:\s.]+$/, "");
-    if (/^(the )?ingredients?( list)?$|^(what )?you('ll| will)? need$/.test(low)){ mode = "i"; continue; }
-    if (/^(instructions|directions|method|preparation|steps|procedure|to make|how to make( it)?)$/.test(low)){ mode = "s"; continue; }
-    if (/^(notes?|tips|chef'?s notes?|variations?|substitutions?)$/.test(low)){ mode = "n"; continue; }
-    const sv = l.match(/\b(?:serves|servings|yields?|makes)\b[:\s]*(?:about\s*)?(\d+)/i);
-    if (sv && !servings && l.length < 60){ servings = +sv[1]; continue; }
-    if (/^(prep|cook|total|bake|active|chill)(ing)?\s*time\b/i.test(l)){ notes.push(l); continue; }
-    const chatty = /^(sure|here('s| is| are)|okay|ok|great|absolutely|of course|certainly|enjoy|let me know|i hope|happy (cooking|baking)|would you like)\b/i.test(l);
-    if (chatty) continue;
-    if (isHeading && !mode && !mdTitle && !/:$/.test(l)){ mdTitle = l; continue; }
+    const low = l.toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").replace(/[:\s.]+$/, "");
+    if (/^(the )?ingredients?( list)?$|^(what )?you('ll| will)? need$|^shopping list$/.test(low)){ mode = "i"; continue; }
+    if (/^(instructions|directions|method|preparation|steps|procedure|to make|how to make( it)?|how to)$/.test(low)){ mode = "s"; continue; }
+    if (/^(notes?|tips|chef'?s notes?|variations?|substitutions?|serving suggestions?|storage|make ahead|optional add-ins|extras)$/.test(low)){ mode = "n"; continue; }
+    if (/^(serves|servings?|yields?|makes|prep(aration)?( time)?|cook(ing)? time|bake time|total( time)?|time|active time)\s*[:\-–]/i.test(l) && l.length < 80){ meta.push(l); continue; }
+    if (CHATTY.test(l)){ if (!ings.length && !steps.length) intro.push({text:l, chatty:true}); continue; }
+    if (isHeading && !mode && !mdTitle && !/:$/.test(l) && !ings.length){ mdTitle = l; continue; }
     const bare = l.replace(BULLET, "");
     const stepLike = /^(step\s*)?\d+[.):]\s+\D/i.test(bare);
     const looksIng = !stepLike && QTY_RE.test(normFracs(bare)) && bare.length < 120 && !/[.!?]$/.test(bare);
     const sentence = (bare.length > 50 && /[.!?]$/.test(bare)) || /,$/.test(bare) || STEP_VERB.test(bare);
     const lastStep = steps[steps.length - 1];
-    if (mode === "n"){ notes.push(l); continue; }
+    if (mode === "n"){ notes.push(bare); continue; }
+    if (mode === "i" && /^(notes?|tips?)\s*:/i.test(bare)){ notes.push(bare); continue; }
     if (mode === "i" && !sentence && !stepLike){ ings.push(bare); continue; }
-    if (!mode && !title && !mdTitle && !looksIng && l.length < 80){ title = l.replace(/:$/, ""); continue; }
+    if (steps.length && NOTE_START.test(bare)){ mode = "n"; notes.push(bare); continue; }
+    if (!mode && !ings.length && !steps.length && !looksIng){
+      if (!title && !mdTitle && l.length < 70 && !/[.!?]$/.test(l)) title = l.replace(/:$/, "");
+      else intro.push({text:l});
+      continue;
+    }
     if (!mode && looksIng && !steps.length){ ings.push(bare); continue; }
     if (!mode && ings.length && !steps.length && bare.length <= 40 && !/[.!?,]$/.test(bare) && !stepLike && !STEP_VERB.test(bare)){ ings.push(bare); continue; }
-    // Steps: join lines that Live Text or copying wrapped mid-sentence
     const clean = bare.replace(/^(step\s*)?\d+[.):]\s*/i, "");
     if (lastStep && !stepLike && !/[.!?:)]$/.test(lastStep)) steps[steps.length - 1] = lastStep + " " + clean;
     else steps.push(clean);
     if (mode === "i") mode = "s";
   }
-  const all = String(text);
-  const pm = all.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")?\s*(?:pan|dish|baking)/i) || all.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")/i);
-  const rm = all.match(/(\d+)[\s-]*(?:inch|in\.?|")\s*(?:round|cake pan|pie|skillet|springform|tube|bundt)/i);
-  return {title: (mdTitle || title).replace(/^recipe:\s*/i, ""), servings, pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
-    ingredients: ings.map(l => ({line:l, category:""})), steps, notes: notes.join("\n")};
+  // Name: a heading, else a short first line, else read it from the intro ("I'd make creamy orzo…")
+  let name = mdTitle || title, nameSentence = "";
+  if (!name) for (const x of intro){ for (const sn of sentencesOf(x.text)){ const t = titleFromSentence(sn); if (t){ name = t; nameSentence = sn; break; } } if (name) break; }
+  const introText = intro.map(x => x.text).join(" ");
+  const metaText = meta.join("\n");
+  const serves = findServings(metaText) || findServings(introText) || findServings(src.split(/\n/).filter(x => x.length < 80).join("\n"));
+  const times = findTimes(metaText + "\n" + introText + "\n" + src, introText);
+  // Intro tips go to notes; greetings, the name sentence and time/serving sentences don't
+  const introNotes = [];
+  for (const x of intro){
+    if (x.chatty) continue;
+    for (const sn of sentencesOf(x.text)){
+      if (sn === nameSentence) continue;
+      if (/\b(serves|servings?|feeds|minutes?|mins?|hours?|hrs?)\b/i.test(sn) && sn.length < 70) continue;
+      introNotes.push(sn);
+    }
+  }
+  const allNotes = (introNotes.length ? [introNotes.join(" ")] : []).concat(notes);
+  const pm = src.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")?\s*(?:pan|dish|baking)/i) || src.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")/i);
+  const rm = src.match(/(\d+)[\s-]*(?:inch|in\.?|")\s*(?:round|cake pan|pie|skillet|springform|tube|bundt)/i);
+  return {title: name.replace(/^recipe:\s*/i, ""), serves, prepTime: times.prep, cookTime: times.cook, totalTime: times.total,
+    pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
+    ingredients: ings.map(l => ({line:l, category:""})), steps, notes: allNotes.join("\n\n")};
+}
+function listEditor(kind, arr){
+  const isStep = kind === "steps";
+  const focusRow = i => setTimeout(() => { const el = document.getElementById("d-" + kind + "-" + i); if (el){ el.focus(); grow(el); } }, 0);
+  const wrap = h("div", {class:"ledit"});
+  arr.forEach((v, i) => {
+    put(wrap, h("div", {class:"lrow"},
+      h("span", {class: isStep ? "lnum" : "lnum bul", "aria-hidden":"true"}, isStep ? String(i + 1) : "•"),
+      h("textarea", {class:"in auto", id:"d-" + kind + "-" + i, rows:"1", "aria-label": (isStep ? "Step " : "Ingredient ") + (i + 1),
+        placeholder: isStep ? (i === 0 ? "Heat the oven to 350°F." : "Next step") : (i === 0 ? "2 cups all-purpose flour" : i === 1 ? "1 tsp baking soda" : "Next ingredient"),
+        oninput:e => { arr[i] = e.target.value; grow(e.target); },
+        onkeydown:e => {
+          if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); const el = e.target, at = el.selectionStart;
+            arr[i] = el.value.slice(0, at).trimEnd(); arr.splice(i + 1, 0, el.value.slice(at).trimStart()); render(); focusRow(i + 1); }
+          else if (e.key === "Backspace" && e.target.value === "" && arr.length > 1){ e.preventDefault(); arr.splice(i, 1); render(); focusRow(Math.max(0, i - 1)); }
+        },
+        onpaste:e => {
+          const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
+          if (!/\n/.test(t.trim())) return;
+          e.preventDefault();
+          const parts = isStep ? t.split(/\n\s*\n|\n(?=\s*(?:step\s*)?\d+[.)]\s)/i) : t.split(/\r?\n/);
+          const clean = parts.map(x => x.replace(/\s*\n\s*/g, " ").replace(/^[-–•*·▢☐□]\s*/, "").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
+          if (!clean.length) return;
+          if (arr[i].trim()) arr.splice(i + 1, 0, ...clean); else arr.splice(i, 1, ...clean);
+          render(); focusRow(i + clean.length - (arr[i] === clean[0] ? 1 : 0));
+        }}, v),
+      h("button", {class:"x", type:"button", "aria-label":"Remove " + (isStep ? "step " : "ingredient ") + (i + 1), onclick:() => { arr.splice(i, 1); if (!arr.length) arr.push(""); render(); }}, "×")));
+  });
+  put(wrap, h("button", {class:"btn ghost sm addline", type:"button", onclick:() => { arr.push(""); render(); focusRow(arr.length - 1); }}, isStep ? "+ Add a step" : "+ Add an ingredient"));
+  return wrap;
 }
 function reviewStep(sh, body, foot){
   const d = sh.draft;
-  if (sh.kind !== "typed" && !sh.editingId) body.append(h("p", {class:"note", style:"margin:0"}, "Check the amounts against the original before saving" + (sh.kind === "card" ? ", especially anything marked (?)." : ".")));
-  body.append(
-    h("label", {class:"f"}, "Recipe name", h("input", {class:"in", id:"d-title", value:d.title, placeholder:"Grandma's pound cake", oninput:e => { d.title = e.target.value; }})),
-    h("div", {class:"inline"},
-      h("label", {class:"f", style:"flex:1 1 110px"}, "Servings", h("input", {class:"in", id:"d-serv", type:"number", min:"1", inputmode:"numeric", value:d.servings, oninput:e => { d.servings = e.target.value; }})),
-      h("label", {class:"f", style:"flex:3 1 220px"}, "Original pan", h("select", {class:"in", id:"d-pan", onchange:e => {
-        const v = e.target.value, p = panByKey(v), count = (d.pan && d.pan.count) || 1;
-        d.pan = v === "" ? null : p ? {k:v, shape:p.shape, a:p.a, b:p.b, count} : {k:"custom", shape:"rect", a:"", b:"", count};
-        render();
-      }}, h("option", {value:"", selected:!d.pan}, "No pan (scale by servings)"), PANS.map(p => h("option", {value:p.k, selected: d.pan && d.pan.k === p.k}, p.label)), h("option", {value:"custom", selected: d.pan && d.pan.k === "custom"}, "Other size…"))),
-      d.pan ? h("label", {class:"f", style:"flex:1 1 100px"}, "Pans", h("select", {class:"in", id:"d-count", onchange:e => { d.pan.count = +e.target.value; }}, [1,2,3,4].map(n => h("option", {value:n, selected:(d.pan.count || 1) === n}, String(n))))) : null),
-    d.pan && d.pan.k === "custom" ? customDims("d", d.pan, patch => { Object.assign(d.pan, patch); render(); }) : null,
-    h("label", {class:"f"}, "Ingredients, one per line", h("textarea", {class:"in", id:"d-ing", rows:"9", placeholder:"2 cups all-purpose flour\n1 tsp baking soda\n3 large eggs, beaten\nFor the glaze:\n1 cup powdered sugar", oninput:e => { d.ingText = e.target.value; }}, d.ingText)),
-    h("label", {class:"f"}, "Steps, separated by a blank line", h("textarea", {class:"in", id:"d-steps", rows:"8", placeholder:"Heat the oven to 350°F.\n\nCream the butter and sugar…", oninput:e => { d.stepsText = e.target.value; }}, d.stepsText)),
-    h("label", {class:"f"}, "Notes", h("textarea", {class:"in", id:"d-notes", rows:"2", oninput:e => { d.notes = e.target.value; }}, d.notes)),
+  if (sh.kind !== "typed" && !sh.editingId) put(body, h("p", {class:"note", style:"margin:0"}, "Check everything against the original before saving" + (sh.kind === "card" ? ", especially words Live Text may have misread." : ".")));
+  const panSel = h("select", {class:"in", id:"d-pan", onchange:e => {
+    const v = e.target.value, p = panByKey(v), count = (d.pan && d.pan.count) || 1;
+    d.pan = v === "" ? null : p ? {k:v, shape:p.shape, a:p.a, b:p.b, count} : {k:"custom", shape:"rect", a:"", b:"", count};
+    render();
+  }}, h("option", {value:"", selected:!d.pan}, "No pan (scale by servings)"), PANS.map(p => h("option", {value:p.k, selected: d.pan && d.pan.k === p.k}, p.label)), h("option", {value:"custom", selected: d.pan && d.pan.k === "custom"}, "Other size…"));
+  const timeField = (key, label) => h("label", {class:"f", style:"flex:1 1 90px"}, label, h("input", {class:"in", id:"d-" + key, value:d[key], placeholder:"— min", oninput:e => { d[key] = e.target.value; }}));
+  put(body,
+    h("section", {class:"details", "aria-label":"Recipe details"},
+      h("label", {class:"f"}, "Recipe name", h("textarea", {class:"in auto", id:"d-title", rows:"1", placeholder:"Grandma's pound cake", oninput:e => { d.title = e.target.value.replace(/\n/g, " "); grow(e.target); }, onkeydown:e => { if (e.key === "Enter") e.preventDefault(); }}, d.title)),
+      h("div", {class:"inline"},
+        h("label", {class:"f", style:"flex:1 1 90px"}, "Serves", h("input", {class:"in", id:"d-serves", value:d.serves, inputmode:"text", placeholder:"4", oninput:e => { d.serves = e.target.value; }})),
+        timeField("prepTime", "Prep time"), timeField("cookTime", "Cook time"), timeField("totalTime", "Total time")),
+      h("div", {class:"inline"},
+        h("label", {class:"f", style:"flex:3 1 220px"}, "Original pan", panSel),
+        d.pan ? h("label", {class:"f", style:"flex:1 1 90px"}, "Pans", h("select", {class:"in", id:"d-count", onchange:e => { d.pan.count = +e.target.value; }}, [1,2,3,4].map(n => h("option", {value:n, selected:(d.pan.count || 1) === n}, String(n))))) : null),
+      d.pan && d.pan.k === "custom" ? customDims("d", d.pan, patch => { Object.assign(d.pan, patch); render(); }) : null),
+    h("section", {class:"rsec"}, h("h3", null, "Ingredients"), h("p", {class:"note", style:"margin:-4px 0 0"}, "One per row. Return adds a row; a heading like “For the glaze:” ends with a colon."), listEditor("ings", d.ings)),
+    h("section", {class:"rsec"}, h("h3", null, "Steps"), listEditor("steps", d.steps)),
+    h("section", {class:"rsec"}, h("h3", null, "Notes"), h("textarea", {class:"in auto", id:"d-notes", rows:"2", placeholder:"Tips, swaps, variations", "aria-label":"Notes", oninput:e => { d.notes = e.target.value; grow(e.target); }}, d.notes)),
     h("label", {class:"f"}, "Source link", h("input", {class:"in", id:"d-url", type:"url", placeholder:"https://", value:d.url, oninput:e => { d.url = e.target.value; }})));
-  if (sh.error) body.append(h("p", {class:"err"}, sh.error));
-  foot.append(
+  if (sh.error) put(body, h("p", {class:"err"}, sh.error));
+  put(foot,
     h("button", {class:"btn", type:"button", onclick: sh.editingId ? closeSheet : () => { sh.step = sh.kind === "typed" ? "choose" : "input"; render(); }}, sh.editingId ? "Cancel" : "Back"),
     h("button", {class:"btn primary", type:"button", onclick:() => {
-      if (!d.title.trim()){ sh.error = "Give the recipe a name."; render(); return; }
-      const lines = d.ingText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (!d.title.trim()){ sh.error = "Give the recipe a name."; render(); document.getElementById("d-title").focus(); return; }
+      const lines = d.ings.flatMap(x => String(x).split(/\r?\n/)).map(l => l.trim()).filter(Boolean);
       if (!lines.length){ sh.error = "Add at least one ingredient."; render(); return; }
       if (d.pan && d.pan.k === "custom" && !(+d.pan.a > 0 && (d.pan.shape === "round" || +d.pan.b > 0))){ sh.error = "Enter the pan's size in inches, or pick No pan."; render(); return; }
       const ingredients = lines.map(l => { const p = parseLine(l); const c = d.cats[l]; return {line:l, category: CATS.includes(c) ? c : (p && p.header ? "Other" : categorize((p && p.item) || l))}; });
-      const steps = d.stepsText.split(/\n\s*\n/).map(s => s.replace(/\s*\n\s*/g, " ").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
+      const steps = d.steps.map(x => String(x).replace(/\s*\n\s*/g, " ").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
       const pan = d.pan ? (d.pan.k === "custom" ? {k:"custom", shape:d.pan.shape, a:+d.pan.a, b: d.pan.shape === "round" ? +d.pan.a : +d.pan.b, count:d.pan.count || 1} : Object.assign({}, d.pan, {count:d.pan.count || 1})) : null;
-      const rec = {title:d.title.trim(), source: sh.kind, servings: +d.servings > 0 ? +d.servings : null, pan, ingredients, steps, notes:d.notes.trim(), url:d.url.trim()};
+      const serves = d.serves.trim().replace(/^serves\s*/i, ""), sm = serves.match(/\d+(?:\.\d+)?/);
+      const rec = {title:d.title.trim(), source: sh.kind, serves, servings: sm ? +sm[0] : null,
+        prepTime:d.prepTime.trim(), cookTime:d.cookTime.trim(), totalTime:d.totalTime.trim(), pan, ingredients, steps, notes:d.notes.trim(), url:d.url.trim()};
       if (sh.editingId){ rec.id = sh.editingId; if (d.createdAt) rec.createdAt = d.createdAt; if (d.example) rec.example = true; }
       const id = saveRecipe(rec), editing = !!sh.editingId;
       closeSheet(); S.scale = null;
