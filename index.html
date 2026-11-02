@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plated by GiGi</title>
+<meta name="description" content="Family recipe box: save recipes, scale them to your pan, and build a grocery list for Harris Teeter or Walmart.">
+<meta name="theme-color" content="#2D6A4B">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Plated">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Young+Serif&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#recipes"><b>Plated</b><span>by GiGi</span></a>
+    <nav class="tabs" aria-label="Sections" id="tabs">
+      <button class="tab" id="tab-recipes" type="button">Recipes</button>
+      <button class="tab" id="tab-list" type="button">Grocery list <span class="count" id="listcount" hidden></span></button>
+    </nav>
+    <button class="acct" id="acct" type="button" aria-label="Account and settings" hidden>⚙</button>
+  </div>
+</header>
+<main class="wrap" id="app" aria-live="polite"><p class="note">Opening the recipe box…</p></main>
+<div id="sheetroot"></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

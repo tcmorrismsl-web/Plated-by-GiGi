@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only these Google accounts can read or change Plated's data.
+    // Replace the two addresses, then paste this whole file into
+    // Firebase console > Firestore Database > Rules and click Publish.
+    function isFamily() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+          'first.person@gmail.com',
+          'second.person@gmail.com'
+        ];
+    }
+
+    match /households/{house}/{document=**} {
+      allow read, write: if isFamily();
+    }
+  }
+}
