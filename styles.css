@@ -116,11 +116,12 @@ textarea.in{resize:vertical;line-height:1.5}
 .stepper input{width:80px;text-align:center;font-variant-numeric:tabular-nums}
 
 .ings{margin-top:22px}
-.ilist{list-style:none;margin:0;padding:0;background:repeating-linear-gradient(to bottom,transparent 0 35px,var(--rule) 35px 36px)}
-.ilist li{display:grid;grid-template-columns:7.2rem minmax(0,1fr);gap:10px;min-height:36px;padding:6px 0 0;line-height:1.35}
-.ilist li.hdr{display:block;font-weight:700;font-size:.82rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding-top:12px}
+.ilist{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule)}
+.ilist li{display:grid;grid-template-columns:8.5rem minmax(0,1fr);gap:12px;align-items:baseline;padding:8px 0 7px;border-bottom:1px solid var(--rule);line-height:1.35}
+@media (max-width:420px){.ilist li{grid-template-columns:6.8rem minmax(0,1fr)}}
+.ilist li.hdr{display:block;font-weight:700;font-size:.82rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding-top:16px}
 .amt{font-weight:700;font-variant-numeric:tabular-nums}
-.was{display:block;font-size:.76rem;color:var(--muted);font-weight:400}
+.was{display:block;font-size:.76rem;color:var(--muted);font-weight:400;margin-top:2px}
 .inote{color:var(--muted)}
 .hint{display:inline-block;font-size:.72rem;font-weight:700;color:var(--warn);margin-left:6px}
 .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px;counter-reset:s}
@@ -200,7 +201,7 @@ textarea.in{resize:vertical;line-height:1.5}
 .gate .hd{padding:22px 24px 14px;border-bottom:2px solid var(--margin)}
 .gate h1{font-family:var(--f-display);font-weight:400;font-size:2rem;margin:0;line-height:1.1}
 .gate .hd p{margin:6px 0 0;color:var(--muted)}
-.gate .gb{padding:18px 24px 24px;display:flex;flex-direction:column;gap:14px;background:repeating-linear-gradient(to bottom,transparent 0 31px,var(--rule) 31px 32px);line-height:1.6}
+.gate .gb{padding:18px 24px 24px;display:flex;flex-direction:column;gap:14px;line-height:1.6}
 .gate .gb p{margin:0}
 .gate ol{margin:0;padding-left:20px}
 .gbtn{gap:10px;padding:11px 18px;font-size:1rem}
