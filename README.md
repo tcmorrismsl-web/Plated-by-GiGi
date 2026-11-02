@@ -17,7 +17,7 @@ A family recipe box for two phones. Save recipes from websites, photos of recipe
 6. **Firestore Database → Rules:** paste the contents of `firestore.rules`, put your two Google email addresses in the list, and click **Publish**.
 
 ### 2. GitHub Pages
-Repo **Settings → Pages → Build and deployment**: Source **Deploy from a branch**, branch **main**, folder **/ (root)**. The site appears at `https://tcmorrismsl-web.github.io/plated-by-gigi/` within a minute or two.
+Repo **Settings → Pages → Build and deployment**: Source **Deploy from a branch**, branch **main**, folder **/ (root)**. The site appears at `https://tcmorrismsl-web.github.io/Plated-by-GiGi/` within a minute or two.
 
 ### 3. On each phone
 1. Open the site in Safari and sign in with Google.
