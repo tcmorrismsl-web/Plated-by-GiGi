@@ -843,7 +843,7 @@ function renderSheet(){
   else if (sh.step === "choose"){
     const kinds = [
       ["web", "Website", "Paste the recipe text from any recipe page."],
-      ["card", "Recipe card", "Upload a photo of a handwritten or printed card."],
+      ["card", "Recipe card", "Copy the card's words with iPhone Live Text and paste them."],
       ["ai", "AI chat", "Paste a conversation where a recipe was worked out."],
       ["typed", "Type it in", "Write the ingredients and steps yourself."]];
     body.append(h("div", {class:"kinds"}, kinds.map(([k, t, d]) => h("button", {class:"kind", type:"button", onclick:() => {
@@ -877,14 +877,18 @@ function settingsStep(sh, body, foot){
 function inputStep(sh, body, foot){
   const hasKey = !!getKey();
   if (sh.kind === "web") body.append(h("label", {class:"f"}, "Recipe page link (optional, saved as the source)", h("input", {class:"in", id:"in-url", type:"url", placeholder:"https://", value:sh.url || "", oninput:e => { sh.url = e.target.value; }})));
-  if (sh.kind === "card"){
-    if (!hasKey){
-      body.append(h("p", {class:"err"}, "Reading a card photo needs a Claude API key on this device. Add one in Settings, or type the card in."));
-      foot.append(h("button", {class:"btn", type:"button", onclick:() => { sh.step = "choose"; render(); }}, "Back"),
-        h("button", {class:"btn", type:"button", onclick:openSettings}, "Settings"),
-        h("button", {class:"btn primary", type:"button", onclick:() => { sh.step = "review"; sh.draft = blankDraft(); render(); }}, "Type it in"));
-      return;
-    }
+  if (sh.kind === "card" && !sh.usePhoto){
+    body.append(
+      h("ol", {class:"how"},
+        h("li", null, "Take a photo of the card, or just point the Camera at it."),
+        h("li", null, "Tap the Live Text button (the square with lines) in the corner of the photo or camera view."),
+        h("li", null, "Tap Select All, then Copy. Do the back of the card too if it has more."),
+        h("li", null, "Paste everything below and tap Read the recipe.")),
+      h("label", {class:"f"}, "Paste the card's text",
+        h("textarea", {class:"in", id:"in-text", rows:"10", placeholder:"Grandma's Pound Cake\n2 cups sugar\n1 cup butter\n5 eggs\n…\nCream butter and sugar…", oninput:e => { sh.text = e.target.value; }}, sh.text || "")),
+      h("p", {class:"note"}, "Plated sorts the lines into ingredients and steps. Check them on the next screen, especially any words Live Text misread."));
+    if (hasKey) body.append(h("p", {class:"note"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => { sh.usePhoto = true; sh.error = null; render(); }}, "Upload a photo instead (uses your Claude key)")));
+  } else if (sh.kind === "card"){
     const pick = files => {
       const list = [...files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name)).slice(0, 4);
       if (!list.length){ sh.error = "Choose a photo of the card."; render(); return; }
@@ -905,10 +909,10 @@ function inputStep(sh, body, foot){
   if (sh.busy) body.append(h("div", {class:"busy"}, h("span", {class:"dot"}), sh.kind === "card" ? "Reading the card… this can take up to a minute." : "Reading the recipe…"));
   foot.append(
     sh.busy ? h("button", {class:"btn", type:"button", onclick:() => sh.ctl && sh.ctl.abort()}, "Stop") : h("button", {class:"btn", type:"button", onclick:() => { sh.step = "choose"; sh.error = null; render(); }}, "Back"),
-    h("button", {class:"btn primary", type:"button", disabled: sh.busy, onclick:() => runExtract(sh)}, sh.kind === "card" ? "Read the card" : "Read the recipe"));
+    h("button", {class:"btn primary", type:"button", disabled: sh.busy, onclick:() => runExtract(sh)}, sh.kind === "card" && sh.usePhoto ? "Read the card" : "Read the recipe"));
 }
 function extractPrompt(kind, text){
-  const what = kind === "card" ? "the attached photo(s) of a recipe card (handwritten or printed)" : kind === "ai" ? "a conversation with an AI assistant. Use the final version of the recipe the conversation settled on" : "text copied from a recipe web page, which may include ads, stories and comments to ignore";
+  const what = kind === "card" ? "the attached photo(s) of a recipe card (handwritten or printed)" : kind === "cardtext" ? "text copied from a photo of a recipe card with phone text recognition, which may have line breaks in odd places and a few misread words" : kind === "ai" ? "a conversation with an AI assistant. Use the final version of the recipe the conversation settled on" : "text copied from a recipe web page, which may include ads, stories and comments to ignore";
   return `Extract one recipe from ${what}.
 Reply with only a JSON object in exactly this shape:
 {"title": string, "servings": number or null, "pan": {"shape": "rect" or "round", "width": number, "length": number} or null, "ingredients": [{"line": string, "category": string}], "steps": [string], "notes": string}
@@ -923,12 +927,13 @@ Rules:
 }
 async function runExtract(sh){
   sh.error = null;
-  if (sh.kind === "card" && !sh.files.length){ sh.error = "Add a photo of the card first."; render(); return; }
-  if (sh.kind !== "card" && !(sh.text || "").trim()){ sh.error = "Paste the recipe text first."; render(); return; }
+  const photo = sh.kind === "card" && sh.usePhoto;
+  if (photo && !sh.files.length){ sh.error = "Add a photo of the card first."; render(); return; }
+  if (!photo && !(sh.text || "").trim()){ sh.error = sh.kind === "card" ? "Paste the card's text first." : "Paste the recipe text first."; render(); return; }
   if (!getKey()){ applyDraft(sh, localExtract(sh.text)); return; }
   sh.busy = true; sh.ctl = new AbortController(); render();
   try {
-    const data = await claudeJSON(extractPrompt(sh.kind, sh.kind === "card" ? "" : sh.text), sh.kind === "card" ? sh.files : [], sh.ctl.signal);
+    const data = await claudeJSON(extractPrompt(photo ? "card" : sh.kind === "card" ? "cardtext" : sh.kind, photo ? "" : sh.text), photo ? sh.files : [], sh.ctl.signal);
     sh.busy = false;
     if (!data || data.error || !Array.isArray(data.ingredients)){ sh.error = "No recipe found there. Check that the ingredients and steps are included."; render(); return; }
     applyDraft(sh, data);
@@ -950,25 +955,45 @@ function applyDraft(sh, data){
   sh.step = "review"; render();
 }
 /* Built-in splitter, used when there's no Claude key */
+const STEP_VERB = /^(cream|mix|stir|bake|combine|add|beat|whisk|pour|preheat|heat|cook|place|put|fold|blend|sift|grease|melt|let|cool|chill|serve|bring|simmer|boil|cut|chop|spread|roll|cover|remove|season|sprinkle|top|layer|drain|transfer|line|turn|reduce|fry|saut(e|é)|brown|knead|in a|in another)\b/i;
 function localExtract(text){
-  const lines = String(text || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  let title = "", servings = null, mode = null; const ings = [], steps = [], notes = [];
-  for (const l of lines){
-    const low = l.toLowerCase().replace(/[:\s]+$/, "");
-    if (/^ingredients?$/.test(low)){ mode = "i"; continue; }
-    if (/^(instructions|directions|method|preparation|steps|how to make it)$/.test(low)){ mode = "s"; continue; }
-    if (/^(notes?|tips)$/.test(low)){ mode = "n"; continue; }
-    const sv = l.match(/\b(?:serves|servings|yield|makes)\b[:\s]*(\d+)/i);
-    if (sv && !servings){ servings = +sv[1]; continue; }
-    if (!title && !mode && l.length < 80 && !/^\d/.test(l)){ title = l; continue; }
-    const looksIng = QTY_RE.test(normFracs(l.replace(/^[-•*·▢☐□]\s*/, ""))) && l.length < 120;
-    if (mode === "i" || (!mode && looksIng)) ings.push(l.replace(/^[-•*·▢☐□]\s*/, ""));
-    else if (mode === "n") notes.push(l);
-    else if (mode === "s" || l.length > 30) steps.push(l.replace(/^(step\s*)?\d+[.):]\s*/i, ""));
+  const BULLET = /^[-–•*·▢☐□✓✔]\s*/;
+  let title = "", mdTitle = "", servings = null, mode = null;
+  const ings = [], steps = [], notes = [];
+  for (const rawLine of String(text || "").split(/\r?\n/)){
+    const isHeading = /^\s*#{1,6}\s/.test(rawLine) || /^\s*(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/.test(rawLine);
+    const l = rawLine.replace(/^\s*>+\s?/, "").replace(/^\s*#{1,6}\s*/, "").replace(/\*\*|__|`/g, "").trim();
+    if (!l || /^[-*_=]{3,}$/.test(l)) continue;
+    const low = l.toLowerCase().replace(/[:\s.]+$/, "");
+    if (/^(the )?ingredients?( list)?$|^(what )?you('ll| will)? need$/.test(low)){ mode = "i"; continue; }
+    if (/^(instructions|directions|method|preparation|steps|procedure|to make|how to make( it)?)$/.test(low)){ mode = "s"; continue; }
+    if (/^(notes?|tips|chef'?s notes?|variations?|substitutions?)$/.test(low)){ mode = "n"; continue; }
+    const sv = l.match(/\b(?:serves|servings|yields?|makes)\b[:\s]*(?:about\s*)?(\d+)/i);
+    if (sv && !servings && l.length < 60){ servings = +sv[1]; continue; }
+    if (/^(prep|cook|total|bake|active|chill)(ing)?\s*time\b/i.test(l)){ notes.push(l); continue; }
+    const chatty = /^(sure|here('s| is| are)|okay|ok|great|absolutely|of course|certainly|enjoy|let me know|i hope|happy (cooking|baking)|would you like)\b/i.test(l);
+    if (chatty) continue;
+    if (isHeading && !mode && !mdTitle && !/:$/.test(l)){ mdTitle = l; continue; }
+    const bare = l.replace(BULLET, "");
+    const stepLike = /^(step\s*)?\d+[.):]\s+\D/i.test(bare);
+    const looksIng = !stepLike && QTY_RE.test(normFracs(bare)) && bare.length < 120 && !/[.!?]$/.test(bare);
+    const sentence = (bare.length > 50 && /[.!?]$/.test(bare)) || /,$/.test(bare) || STEP_VERB.test(bare);
+    const lastStep = steps[steps.length - 1];
+    if (mode === "n"){ notes.push(l); continue; }
+    if (mode === "i" && !sentence && !stepLike){ ings.push(bare); continue; }
+    if (!mode && !title && !mdTitle && !looksIng && l.length < 80){ title = l.replace(/:$/, ""); continue; }
+    if (!mode && looksIng && !steps.length){ ings.push(bare); continue; }
+    if (!mode && ings.length && !steps.length && bare.length <= 40 && !/[.!?,]$/.test(bare) && !stepLike && !STEP_VERB.test(bare)){ ings.push(bare); continue; }
+    // Steps: join lines that Live Text or copying wrapped mid-sentence
+    const clean = bare.replace(/^(step\s*)?\d+[.):]\s*/i, "");
+    if (lastStep && !stepLike && !/[.!?:)]$/.test(lastStep)) steps[steps.length - 1] = lastStep + " " + clean;
+    else steps.push(clean);
+    if (mode === "i") mode = "s";
   }
-  const pm = String(text).match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")/i);
-  const rm = String(text).match(/(\d+)[\s-]*(?:inch|in\.?|")\s*(?:round|cake pan|pie|skillet)/i);
-  return {title, servings, pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
+  const all = String(text);
+  const pm = all.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")?\s*(?:pan|dish|baking)/i) || all.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")/i);
+  const rm = all.match(/(\d+)[\s-]*(?:inch|in\.?|")\s*(?:round|cake pan|pie|skillet|springform|tube|bundt)/i);
+  return {title: (mdTitle || title).replace(/^recipe:\s*/i, ""), servings, pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
     ingredients: ings.map(l => ({line:l, category:""})), steps, notes: notes.join("\n")};
 }
 function reviewStep(sh, body, foot){

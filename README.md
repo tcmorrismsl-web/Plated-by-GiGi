@@ -4,7 +4,7 @@ A family recipe box for two phones. Save recipes from websites, photos of recipe
 
 - **Hosting:** GitHub Pages (this repo). No build step: plain HTML, CSS and JavaScript.
 - **Shared data:** Firebase Firestore, with Google sign-in. Only the Google accounts listed in `firestore.rules` can read or change anything.
-- **Reading cards and recipe pages:** optional Claude API key, entered in the app's Settings on each phone. It stays on that phone.
+- **Recipe cards:** copy the card's words with iPhone Live Text and paste them; Plated sorts the lines into ingredients and steps for free. An optional Claude API key (Settings, per phone) adds photo upload and smarter reading.
 
 ## One-time setup
 
@@ -22,7 +22,7 @@ Repo **Settings → Pages → Build and deployment**: Source **Deploy from a bra
 ### 3. On each phone
 1. Open the site in Safari and sign in with Google.
 2. **Share → Add to Home Screen** to get the Plated icon.
-3. Optional: tap the round account button (top right) → paste a Claude API key from [console.anthropic.com](https://console.anthropic.com) to turn on recipe-card reading. API use is billed to that Anthropic account, separately from any Claude subscription.
+3. Optional: tap the round account button (top right) → paste a Claude API key from [console.anthropic.com](https://console.anthropic.com) to add photo upload. Not needed for Live Text, websites or AI chats. API use is billed to that Anthropic account, separately from any Claude subscription.
 
 ## Adding someone later
 Add their email address to the list in the Firestore rules and publish. Nothing in this repo needs to change.
