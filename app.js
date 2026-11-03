@@ -727,36 +727,70 @@ function matchText(text, info){
     const clash = taken.find(t => !(c.to < t.from || c.from > t.to));
     if (clash && !(clash.s === c.s && clash.from === c.from && clash.to === c.to)) continue;
     taken.push(c);
-    if (!res.has(c.k)) res.set(c.k, {k:c.k, hint:hintBefore(toks, c.ti)});
+    if (!res.has(c.k)) res.set(c.k, {k:c.k, s:c.s, g:c.from + ":" + c.to, hint:hintBefore(toks, c.ti)});
   }
   return [...res.values()];
 }
 function ingInfo(ings){
   const parsed = ings.map(i => parseLine(i.line));
   const info = parsed.map(p => p && !p.header && p.item ? {phrases:ingPhrases(p.item)} : null);
+  // A word is "unique" when only one ingredient name has it; the same name listed twice (vanilla in dough and frosting) still counts once
   const wc = {};
-  info.forEach(inf => inf && new Set(inf.phrases.filter(x => x.single).map(x => x.p)).forEach(w => { wc[w] = (wc[w] || 0) + 1; }));
-  info.forEach(inf => { if (inf) inf.unique = new Set(inf.phrases.filter(x => x.single && wc[x.p] === 1 && x.p.length > 3 && !GENERIC.has(x.p) && !MODIFIER.has(x.p)).map(x => x.p)); });
-  return {parsed, info};
+  info.forEach((inf, i) => { if (!inf) return; const name = normWords(cleanName(parsed[i].item)).join(" ");
+    inf.phrases.filter(x => x.single).forEach(x => { (wc[x.p] = wc[x.p] || new Set()).add(name); }); });
+  info.forEach(inf => { if (inf) inf.unique = new Set(inf.phrases.filter(x => x.single && wc[x.p].size === 1 && x.p.length > 3 && !GENERIC.has(x.p) && !MODIFIER.has(x.p)).map(x => x.p)); });
+  const grp = []; let g = 0;
+  parsed.forEach((p, i) => { if (p && p.header) g++; grp[i] = g; });
+  return {parsed, info, grp};
 }
 const scaleP = (p, f) => Object.assign({}, p, {qty: p.qty == null ? null : p.qty * f, qtyMax: p.qtyMax == null ? null : p.qtyMax * f});
 // For each step: the ingredients it adds and how much. Uses the recipe's own "Adds" lines when it has them, else reads the step text.
 function stepUses(r, factor){
   const ings = r.ingredients || [], steps = r.steps || [];
-  const {parsed, info} = ingInfo(ings);
+  const {parsed, info, grp} = ingInfo(ings);
   const per = steps.map(() => []), ingSteps = {};
   const explicit = Array.isArray(r.uses) && r.uses.some(u => u && String(u).trim());
+  // Ingredients that read the same (dough butter, filling butter, frosting butter): pick by matching amount,
+  // then the ingredient group (dough / filling / frosting) the rest of the step comes from, then one not used yet.
+  const used = new Set();
+  const qtyMatch = (m, want) => { const p = parsed[m.k]; return p && p.qty != null && Math.abs(p.qty - want.qty) < 1e-6 && (p.unit || "") === (want.unit || ""); };
+  const resolveStep = items => {
+    const chosen = items.map(it => it.cands.length === 1 ? it.cands[0] : null);
+    const counts = {};
+    chosen.forEach(m => { if (m) counts[grp[m.k]] = (counts[grp[m.k]] || 0) + 1; });
+    const fav = Object.keys(counts).sort((x, y) => counts[y] - counts[x])[0];
+    items.forEach((it, j) => {
+      if (chosen[j] || !it.cands.length) return;
+      let pool = it.cands;
+      if (it.want && it.want.qty != null){ const same = pool.filter(m => qtyMatch(m, it.want)); if (same.length) pool = same; }
+      if (fav != null){ const inGrp = pool.filter(m => String(grp[m.k]) === fav); if (inGrp.length) pool = inGrp; }
+      const fresh = pool.filter(m => !used.has(m.k)); if (fresh.length) pool = fresh;
+      chosen[j] = pool[0];
+    });
+    chosen.forEach(m => { if (m) used.add(m.k); });
+    return chosen;
+  };
   if (explicit){
     steps.forEach((_, si) => {
-      String(r.uses[si] || "").split(/\s*;\s*/).map(x => x.trim()).filter(x => x && !/^(none|nothing|-|—)$/i.test(x)).forEach(u => {
+      const items = String(r.uses[si] || "").split(/\s*;\s*/).map(x => x.trim()).filter(x => x && !/^(none|nothing|-|—)$/i.test(x)).map(u => {
         const pu = parseLine(u) || {item:u};
         const m = matchText(pu.item || u, info);
-        per[si].push({k: m.length ? m[0].k : -1, use:pu, raw:u});
+        return {raw:u, want:pu, cands: m.length ? m.filter(x => x.g === m[0].g && x.s === m[0].s) : []};
       });
+      resolveStep(items).forEach((pick, j) => per[si].push({k: pick ? pick.k : -1, use:items[j].want, raw:items[j].raw}));
     });
   } else {
     const occ = {};
-    steps.forEach((t, si) => matchText(t, info).forEach(m => { (occ[m.k] = occ[m.k] || []).push({si, hint:m.hint}); }));
+    steps.forEach((t, si) => {
+      const groups = new Map();
+      matchText(t, info).forEach(m => { if (!groups.has(m.g)) groups.set(m.g, []); groups.get(m.g).push(m); });
+      const seen = new Set();
+      resolveStep([...groups.values()].map(c => ({cands:c}))).forEach(m => {
+        if (!m || seen.has(m.k)) return;
+        seen.add(m.k);
+        (occ[m.k] = occ[m.k] || []).push({si, hint:m.hint});
+      });
+    });
     for (const key in occ){
       const k = +key, list = occ[key];
       const divided = /\bdivided\b/i.test(ings[k].line);
@@ -1179,11 +1213,12 @@ async function runExtract(sh){
   const photo = sh.kind === "card" && sh.usePhoto;
   if (photo && !sh.files.length){ sh.error = "Add a photo of the card first."; render(); return; }
   if (!photo && !(sh.text || "").trim()){ sh.error = sh.kind === "card" ? "Paste the card's text first." : "Paste the recipe text first."; render(); return; }
-  if (!photo && isPlated(sh.text)){ applyDraft(sh, parsePlated(sh.text)); return; }
-  if (!getKey()){ applyDraft(sh, localExtract(sh.text)); return; }
+  const text = photo ? "" : unflatten(sh.text);
+  if (!photo && isPlated(text)){ applyDraft(sh, parsePlated(text)); return; }
+  if (!getKey()){ applyDraft(sh, localExtract(text)); return; }
   sh.busy = true; sh.ctl = new AbortController(); render();
   try {
-    const data = await claudeJSON(extractPrompt(photo ? "card" : sh.kind === "card" ? "cardtext" : sh.kind, photo ? "" : sh.text), photo ? sh.files : [], sh.ctl.signal);
+    const data = await claudeJSON(extractPrompt(photo ? "card" : sh.kind === "card" ? "cardtext" : sh.kind, text), photo ? sh.files : [], sh.ctl.signal);
     sh.busy = false;
     if (!data || data.error || !Array.isArray(data.ingredients)){ sh.error = "No recipe found there. Check that the ingredients and steps are included."; render(); return; }
     applyDraft(sh, data);
@@ -1240,6 +1275,23 @@ Rules:
 - Keep every amount exactly as in the original. For a handwritten card, put (?) after any word you can't read for sure.
 
 The recipe: use the one from this conversation, or the link, text or photo I add below.`;
+// Some copy and paste routes on iPhone drop every line break. Put them back before reading the recipe.
+function unflatten(t){
+  t = String(t || "").replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n");
+  const lines = t.split("\n").filter(x => x.trim()).length;
+  if (lines >= 8 || t.length < 200) return t;
+  let next = 1;
+  return t
+    .replace(/\s*\b(PLATED RECIPE)\b\s*/, "\n$1\n")
+    .replace(/\s+(?=(?:Title|Name|Serves|Servings|Yield|Prep time|Cook time|Total time|Pan)\s*:)/g, "\n")
+    .replace(/\s+(?=(?:Ingredients|INGREDIENTS|Steps|STEPS|Instructions|INSTRUCTIONS|Directions|DIRECTIONS|Method|Notes|NOTES|Tips)\s*:?\s)/g, "\n")
+    .replace(/(\n(?:Ingredients|INGREDIENTS|Steps|STEPS|Instructions|INSTRUCTIONS|Directions|DIRECTIONS|Method|Notes|NOTES|Tips)\s*:?)\s+/g, "$1\n")
+    .replace(/\s+(?=Adds\s*:)/g, "\n   ")
+    .replace(/\s+[-–•*▢]\s+(?=\S)/g, "\n- ")
+    .replace(/\s+(?=For (?:the )?[A-Za-z][^:\n.]{1,40}:)/g, "\n")
+    .replace(/(^|\s+)(\d{1,2})([.)])\s+(?=[A-Z])/g, (m, sp, n, d) => { if (+n === next){ next++; return "\n" + n + d + " "; } return m; })
+    .replace(/\n{2,}/g, "\n").trim();
+}
 function stripMd(t){ return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/^\s*```\w*\s*$/gm, "").replace(/\*\*|__|`/g, "").replace(/^\s*#{1,6}\s*/gm, ""); }
 function isPlated(t){
   const s = stripMd(t);
