@@ -586,10 +586,14 @@ function viewRecipe(){
   const left = h("div", {class:"panel"}, h("h2", null, "Scale it"), scaler(r, sc, factor),
     h("div", {class:"ings"}, h("h2", null, "Ingredients" + (factor !== 1 ? " · " + fmtFactor(factor) : "")), ingList(r, factor)));
   const right = h("div", {class:"sect"}, h("h2", null, "Method"),
-    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map(s => h("li", null, h("span", null, s)))) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
+    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map(stepItem)) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
     r.notes ? h("div", {class:"notes"}, r.notes) : null);
   put(f, h("div", {class:"cols"}, left, right));
   return f;
+}
+function stepItem(text){
+  const m = String(text).match(/^([^:.!?]{2,50}):(?:\s+([\s\S]+))?$/);
+  return h("li", null, m ? h("span", null, h("b", null, m[1] + ":"), m[2] ? " " + m[2] : null) : h("span", null, text));
 }
 function scaler(r, sc, factor){
   const set = patch => { Object.assign(S.scale, patch); render(); };
@@ -845,14 +849,14 @@ function blankDraft(){ return {title:"", serves:"", prepTime:"", cookTime:"", to
 function renderSheet(){
   const root = $("#sheetroot"); root.textContent = "";
   const sh = S.sheet; if (!sh) return;
-  const titles = {settings:"Settings", choose:"Add a recipe", input:{web:"From a website", card:"From a recipe card", ai:"From an AI chat"}[sh.kind], review: sh.editingId ? "Edit recipe" : "Check the recipe"};
+  const titles = {settings:"Settings", choose:"Add a recipe", input:{web:"From a website", card:"From a recipe card", ai:"From Claude or ChatGPT"}[sh.kind], review: sh.editingId ? "Edit recipe" : "Check the recipe"};
   const body = h("div", {class:"sb"}), foot = h("div", {class:"sf"});
   if (sh.step === "settings") settingsStep(sh, body, foot);
   else if (sh.step === "choose"){
     const kinds = [
+      ["ai", "Claude or ChatGPT", "Best results. Works with links, card photos and chats."],
       ["web", "Website", "Paste the recipe text from any recipe page."],
       ["card", "Recipe card", "Copy the card's words with iPhone Live Text and paste them."],
-      ["ai", "AI chat", "Paste a conversation where a recipe was worked out."],
       ["typed", "Type it in", "Write the ingredients and steps yourself."]];
     put(body, h("div", {class:"kinds"}, kinds.map(([k, t, d]) => h("button", {class:"kind", type:"button", onclick:() => {
       if (k === "typed"){ sh.kind = "typed"; sh.step = "review"; sh.draft = blankDraft(); }
@@ -882,6 +886,32 @@ function settingsStep(sh, body, foot){
     getKey() ? h("button", {class:"btn", type:"button", onclick:() => { setKey(""); sh.keyDraft = ""; toast("Key removed from this device"); render(); }}, "Remove key") : null,
     h("button", {class:"btn primary", type:"button", onclick:() => { const v = (sh.keyDraft || "").trim(); setKey(v); toast(v ? "Key saved on this device" : "Settings saved"); closeSheet(); }}, "Save"));
 }
+function copyText(text, ok){
+  const fallback = () => { const ta = document.getElementById("prompt-text"); if (ta){ ta.hidden = false; ta.focus(); ta.select(); } toast("Select the prompt and tap Copy"); };
+  try { navigator.clipboard.writeText(text).then(() => toast(ok), fallback); } catch(e){ fallback(); }
+}
+function promptPanel(sh){
+  return h("section", {class:"aiprompt"},
+    h("h3", null, "Best results: use the Plated prompt"),
+    h("ol", {class:"how"},
+      h("li", null, "Tap Copy the Plated prompt."),
+      h("li", null, "In Claude or ChatGPT, paste it and add the recipe: a website link, a photo of a recipe card, pasted text, or just send it in the chat where you made the recipe."),
+      h("li", null, "Tap the copy button under its answer, come back, and paste it below.")),
+    h("div", {class:"row"},
+      h("button", {class:"btn primary sm", type:"button", onclick:() => copyText(PLATED_PROMPT, "Prompt copied. Paste it into Claude or ChatGPT.")}, "Copy the Plated prompt"),
+      h("button", {class:"btn ghost sm", type:"button", "aria-expanded": String(!!sh.showPrompt), onclick:() => { sh.showPrompt = !sh.showPrompt; render(); }}, sh.showPrompt ? "Hide prompt" : "See the prompt")),
+    h("textarea", {class:"in prompt-text", id:"prompt-text", readonly:true, rows:"12", hidden: !sh.showPrompt, "aria-label":"The Plated prompt"}, PLATED_PROMPT));
+}
+function pasteButton(sh){
+  return h("button", {class:"btn sm", type:"button", onclick:async () => {
+    try { const t = await navigator.clipboard.readText(); if (t && t.trim()){ sh.text = t; sh.error = null; render(); return; } } catch(e){}
+    const ta = document.getElementById("in-text"); if (ta) ta.focus();
+    toast("Press and hold in the box, then tap Paste");
+  }}, "Paste");
+}
+function aiTip(sh, text){
+  return h("div", {class:"tip"}, h("span", null, text), h("button", {class:"btn ghost sm", type:"button", onclick:() => { sh.kind = "ai"; sh.error = null; render(); }}, "Use the Plated prompt"));
+}
 function inputStep(sh, body, foot){
   const hasKey = !!getKey();
   if (sh.kind === "web") put(body, h("label", {class:"f"}, "Recipe page link (optional, saved as the source)", h("input", {class:"in", id:"in-url", type:"url", placeholder:"https://", value:sh.url || "", oninput:e => { sh.url = e.target.value; }})));
@@ -892,7 +922,8 @@ function inputStep(sh, body, foot){
         h("li", null, "Tap the Live Text button (the square with lines) in the corner of the photo or camera view."),
         h("li", null, "Tap Select All, then Copy. Do the back of the card too if it has more."),
         h("li", null, "Paste everything below and tap Read the recipe.")),
-      h("label", {class:"f"}, "Paste the card's text",
+      aiTip(sh, "Messy handwriting? Send a photo of the card to Claude or ChatGPT with the Plated prompt instead."),
+      h("label", {class:"f"}, h("span", {class:"lblrow"}, "Paste the card's text", pasteButton(sh)),
         h("textarea", {class:"in", id:"in-text", rows:"10", placeholder:"Grandma's Pound Cake\n2 cups sugar\n1 cup butter\n5 eggs\n…\nCream butter and sugar…", oninput:e => { sh.text = e.target.value; }}, sh.text || "")),
       h("p", {class:"note"}, "Plated sorts the lines into ingredients and steps. Check them on the next screen, especially any words Live Text misread."));
     if (hasKey) put(body, h("p", {class:"note"}, h("button", {class:"btn ghost sm", type:"button", onclick:() => { sh.usePhoto = true; sh.error = null; render(); }}, "Upload a photo instead (uses your Claude key)")));
@@ -909,9 +940,11 @@ function inputStep(sh, body, foot){
     put(body, drop);
     if (sh.previews.length) put(body, h("div", {class:"thumbs"}, sh.previews.map((u, i) => h("img", {src:u, alt:"Card photo " + (i + 1)}))));
   } else {
-    put(body, h("label", {class:"f"}, sh.kind === "ai" ? "Paste the conversation" : "Paste the recipe from the page",
-      h("textarea", {class:"in", id:"in-text", rows:"10", placeholder: sh.kind === "ai" ? "Copy the chat (or just the final recipe) and paste it here." : "On the recipe page, select from the title through the last step, copy, and paste here. Extra text like ads or comments is fine.", oninput:e => { sh.text = e.target.value; }}, sh.text || "")));
-    if (!hasKey) put(body, h("p", {class:"note"}, "Plated will split the text into ingredients and steps. Check the result on the next screen. A Claude API key in Settings makes this smarter."));
+    if (sh.kind === "ai") put(body, promptPanel(sh));
+    if (sh.kind === "web") put(body, aiTip(sh, "Easiest: paste the page's link into Claude or ChatGPT with the Plated prompt, then bring the answer back here."));
+    put(body, h("label", {class:"f"}, h("span", {class:"lblrow"}, sh.kind === "ai" ? "Paste the answer" : "Paste the recipe from the page", pasteButton(sh)),
+      h("textarea", {class:"in", id:"in-text", rows:"10", placeholder: sh.kind === "ai" ? "PLATED RECIPE\nTitle: …\n\nOr paste any chat that has a recipe in it." : "On the recipe page, select from the title through the last step, copy, and paste here. Extra text like ads or comments is fine.", oninput:e => { sh.text = e.target.value; }}, sh.text || "")));
+    put(body, h("p", {class:"note"}, sh.kind === "ai" ? "Answers in the Plated format fill in exactly. Other chats are sorted as well as Plated can; check them on the next screen." : "Plated sorts the text into ingredients and steps. Check them on the next screen."));
   }
   if (sh.error) put(body, h("p", {class:"err"}, sh.error));
   if (sh.busy) put(body, h("div", {class:"busy"}, h("span", {class:"dot"}), sh.kind === "card" ? "Reading the card… this can take up to a minute." : "Reading the recipe…"));
@@ -940,6 +973,7 @@ async function runExtract(sh){
   const photo = sh.kind === "card" && sh.usePhoto;
   if (photo && !sh.files.length){ sh.error = "Add a photo of the card first."; render(); return; }
   if (!photo && !(sh.text || "").trim()){ sh.error = sh.kind === "card" ? "Paste the card's text first." : "Paste the recipe text first."; render(); return; }
+  if (!photo && isPlated(sh.text)){ applyDraft(sh, parsePlated(sh.text)); return; }
   if (!getKey()){ applyDraft(sh, localExtract(sh.text)); return; }
   sh.busy = true; sh.ctl = new AbortController(); render();
   try {
@@ -966,6 +1000,94 @@ function applyDraft(sh, data){
   };
   sh.step = "review"; render();
 }
+/* The Plated prompt: Claude or ChatGPT answer in a fixed format that Plated reads exactly */
+const PLATED_PROMPT = `Turn the recipe into this exact plain-text format for my recipe app, Plated. Reply with only the filled-in format: no intro, no closing remarks, no bold, no tables, no code block.
+
+PLATED RECIPE
+Title:
+Serves:
+Prep time:
+Cook time:
+Total time:
+Pan:
+
+Ingredients:
+-
+
+Steps:
+1.
+
+Notes:
+-
+
+Rules:
+- Title: the recipe's name. Make up a short one if it has none.
+- Serves: a number or range, like 4 or 2–3.
+- Times: like 15 min or 1 hr 10 min. Leave blank if unknown.
+- Pan: the baking pan or dish if it uses one, like 9x13 dish, 8x8 square, 9 inch round or 9x5 loaf pan. Otherwise write none.
+- Ingredients: one per line, amount first, then unit, then item, then prep after a comma (2 1/2 cups all-purpose flour, sifted). Use plain fractions like 1/2. For a group, put a line like "For the sauce:" before its ingredients.
+- Steps: one numbered step per action, each a sentence or short paragraph. No sub-bullets: fold any sub-points into the step.
+- Notes: tips, swaps, variations and storage, one per line. Write none if there aren't any.
+- Keep every amount exactly as in the original. For a handwritten card, put (?) after any word you can't read for sure.
+
+The recipe: use the one from this conversation, or the link, text or photo I add below.`;
+function stripMd(t){ return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/^\s*```\w*\s*$/gm, "").replace(/\*\*|__|`/g, "").replace(/^\s*#{1,6}\s*/gm, ""); }
+function isPlated(t){
+  const s = stripMd(t);
+  return /^\s*plated recipe\s*$/im.test(s) || (/^\s*title\s*:/im.test(s) && /^\s*ingredients\s*:\s*$/im.test(s) && /^\s*steps\s*:\s*$/im.test(s));
+}
+function panFromText(v){
+  v = String(v || "").toLowerCase().trim();
+  if (!v || /^(none|n\/a|no|-|—|no pan)$/.test(v)) return null;
+  let m = v.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)/);
+  if (m) return {shape:"rect", width:+m[1], length:+m[2]};
+  m = v.match(/(\d+(?:\.\d+)?)\s*-?\s*(?:inch|in\.?|")?\s*(?:round|pie|skillet|springform|tube|bundt|cake|cast)/);
+  if (m) return {shape:"round", width:+m[1], length:+m[1]};
+  m = v.match(/(\d+(?:\.\d+)?)\s*-?\s*(?:inch|in\.?|")?\s*square/);
+  if (m) return {shape:"rect", width:+m[1], length:+m[1]};
+  if (/loaf/.test(v)) return {shape:"rect", width:5, length:9};
+  return null;
+}
+function parsePlated(text){
+  const out = {title:"", serves:"", prepTime:"", cookTime:"", totalTime:"", pan:null, ingredients:[], steps:[], notes:""};
+  const stepLines = [], notes = [];
+  const blank = v => /^(\[.*\]|n\/a|none|unknown|—|-|blank)?$/i.test(v.trim());
+  let sec = null;
+  for (const raw of stripMd(text).split(/\r?\n/)){
+    const l = raw.trim();
+    if (!l || /^plated recipe$/i.test(l)) continue;
+    const hdr = l.toLowerCase().replace(/[:\s]+$/, "");
+    if (/^ingredients?$/.test(hdr)){ sec = "ings"; continue; }
+    if (/^(steps|instructions|directions|method)$/.test(hdr)){ sec = "steps"; continue; }
+    if (/^(notes?|tips)$/.test(hdr)){ sec = "notes"; continue; }
+    if (/^rules$/.test(hdr)){ sec = "skip"; continue; }
+    const f = !sec && l.match(/^(title|name|serves|servings|yield|prep(?:\s*time)?|cook(?:\s*time)?|bake(?:\s*time)?|total(?:\s*time)?|pan)\s*:\s*(.*)$/i);
+    if (f){
+      const k = f[1].toLowerCase(), v = f[2].trim();
+      if (/^(title|name)/.test(k)) out.title = blank(v) ? "" : v;
+      else if (/^(serves|servings|yield)/.test(k)) out.serves = blank(v) ? "" : (findServings("serves " + v) || v);
+      else if (/^prep/.test(k)) out.prepTime = blank(v) ? "" : normTime(v);
+      else if (/^(cook|bake)/.test(k)) out.cookTime = blank(v) ? "" : normTime(v);
+      else if (/^total/.test(k)) out.totalTime = blank(v) ? "" : normTime(v);
+      else if (k === "pan") out.pan = panFromText(v);
+      continue;
+    }
+    if (sec === "ings"){ const v = l.replace(/^[-–•*·]\s*/, "").trim(); if (v && !blank(v)) out.ingredients.push({line:v, category:""}); }
+    else if (sec === "steps") stepLines.push(l);
+    else if (sec === "notes"){ const v = l.replace(/^[-–•*·]\s*/, "").trim(); if (v && !blank(v)) notes.push(v); }
+  }
+  const numbered = stepLines.some(l => /^(step\s*)?\d+[.):]\s*/i.test(l));
+  for (const l of stepLines){
+    const num = l.match(/^(?:step\s*)?\d+[.):]\s*(.*)$/i);
+    const v = (num ? num[1] : l.replace(/^[-–•*·]\s*/, "")).trim();
+    if (!v || blank(v)) continue;
+    if (!numbered || num || !out.steps.length) out.steps.push(v);
+    else out.steps[out.steps.length - 1] = joinStep(out.steps[out.steps.length - 1], v);
+  }
+  out.notes = notes.join("\n\n");
+  return out;
+}
+
 /* Built-in splitter, used when there's no Claude key */
 const STEP_VERB = /^(cream|mix|stir|bake|combine|add|beat|whisk|pour|preheat|heat|cook|place|put|fold|blend|sift|grease|melt|let|cool|chill|serve|bring|simmer|boil|cut|chop|spread|roll|cover|remove|season|sprinkle|top|layer|drain|transfer|line|turn|reduce|fry|saut(e|é)|brown|knead|adjust|taste|toss|slice|dice|mince|garnish|finish|return|meanwhile|once|when|after|while|in a|in another)\b/i;
 const NOTE_START = /^(if (?!using\b)|tips?\b|notes?\b|variations?\b|swaps?\b|substitut|make[- ]ahead|leftovers?\b|storage\b|to store\b|store (it|leftovers)\b|serving suggestions?\b|serve (it )?with\b|pair (it )?with\b|for (a|an|extra|more|added|less|a lighter|a spicier)\b|to make (it|this)\b|want\b|craving\b|you can also\b|feel free\b|bonus\b|shortcut\b|optional:)/i;
@@ -1007,13 +1129,22 @@ function titleFromSentence(sentence){
   return "";
 }
 const sentencesOf = txt => txt.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/).map(x => x.trim()).filter(Boolean);
+function joinStep(last, add){
+  if (/:$/.test(last) || /[.!?;]$/.test(last)) return last + " " + add;
+  return last + (last.length <= 45 ? ": " : ". ") + add;
+}
 function localExtract(text){
   const BULLET = /^[-–•*·▢☐□✓✔]\s*/;
   const src = String(text || "").replace(/[‘’]/g, "'");
-  let title = "", mdTitle = "", mode = null;
+  let title = "", mdTitle = "", mode = null, group = false;
   const ings = [], steps = [], notes = [], intro = [], meta = [];
-  for (const rawLine of src.split(/\r?\n/)){
+  for (let rawLine of src.split(/\r?\n/)){
+    if (/^\s*```/.test(rawLine)) continue;
+    rawLine = rawLine.replace(/(\*\*|__)([^*_:]{2,50})(\*\*|__)\s*[–—-]\s+/, "$1$2:$3 ");
     const isHeading = /^\s*#{1,6}\s/.test(rawLine) || /^\s*(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/.test(rawLine);
+    const boldOnly = /^\s*(?:(?:step\s*)?\d+[.):]\s*)?(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/i.test(rawLine);
+    const rawBullet = /^\s*[-–•*·]\s+/.test(rawLine) && !/^\s*\*\*/.test(rawLine);
+    const rawIndent = /^(\s{2,}|\t)\S/.test(rawLine);
     const l = rawLine.replace(/^\s*>+\s?/, "").replace(/^\s*#{1,6}\s*/, "").replace(/\*\*|__|`/g, "").trim();
     if (!l || /^[-*_=]{3,}$/.test(l)) continue;
     const low = l.toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").replace(/[:\s.]+$/, "");
@@ -1024,12 +1155,14 @@ function localExtract(text){
     if (CHATTY.test(l)){ if (!ings.length && !steps.length) intro.push({text:l, chatty:true}); continue; }
     if (isHeading && !mode && !mdTitle && !/:$/.test(l) && !ings.length){ mdTitle = l; continue; }
     const bare = l.replace(BULLET, "");
+    const rawNumbered = /^(step\s*)?\d+[.):]\s*\S/i.test(l) && !QTY_RE.test(normFracs(l.replace(/^(step\s*)?\d+[.):]\s*/i, "")).replace(/^\d+[.):]/, "x")) || /^step\s*\d+/i.test(l);
     const stepLike = /^(step\s*)?\d+[.):]\s+\D/i.test(bare);
     const looksIng = !stepLike && QTY_RE.test(normFracs(bare)) && bare.length < 120 && !/[.!?]$/.test(bare);
     const sentence = (bare.length > 50 && /[.!?]$/.test(bare)) || /,$/.test(bare) || STEP_VERB.test(bare);
     const lastStep = steps[steps.length - 1];
     if (mode === "n"){ notes.push(bare); continue; }
     if (mode === "i" && /^(notes?|tips?)\s*:/i.test(bare)){ notes.push(bare); continue; }
+    if (mode === "i" && (isHeading || boldOnly) && !QTY_RE.test(normFracs(bare))){ ings.push(bare.replace(/:?\s*$/, ":")); continue; }
     if (mode === "i" && !sentence && !stepLike){ ings.push(bare); continue; }
     if (steps.length && NOTE_START.test(bare)){ mode = "n"; notes.push(bare); continue; }
     if (!mode && !ings.length && !steps.length && !looksIng){
@@ -1039,10 +1172,15 @@ function localExtract(text){
     }
     if (!mode && looksIng && !steps.length){ ings.push(bare); continue; }
     if (!mode && ings.length && !steps.length && bare.length <= 40 && !/[.!?,]$/.test(bare) && !stepLike && !STEP_VERB.test(bare)){ ings.push(bare); continue; }
-    const clean = bare.replace(/^(step\s*)?\d+[.):]\s*/i, "");
+    const clean = bare.replace(/^step\s*\d+\s*[.):]?\s*|^\d+[.):]\s*/i, "");
+    if (mode === "i") mode = "s";
+    // A bold or heading line inside the method starts a step; bullets under it (or under a numbered step) join it
+    if ((isHeading || boldOnly || (rawNumbered && /:$/.test(clean))) && clean.length <= 60){ steps.push(clean.replace(/:?\s*$/, ":")); group = true; continue; }
+    if (rawNumbered){ steps.push(clean); group = true; continue; }
+    if ((rawBullet || rawIndent) && group && lastStep){ steps[steps.length - 1] = joinStep(lastStep, clean); continue; }
+    if (rawBullet){ steps.push(clean); group = false; continue; }
     if (lastStep && !stepLike && !/[.!?:)]$/.test(lastStep)) steps[steps.length - 1] = lastStep + " " + clean;
     else steps.push(clean);
-    if (mode === "i") mode = "s";
   }
   // Name: a heading, else a short first line, else read it from the intro ("I'd make creamy orzo…")
   let name = mdTitle || title, nameSentence = "";

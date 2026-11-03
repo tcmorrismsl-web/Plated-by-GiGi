@@ -237,3 +237,13 @@ textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-
   .brand span{display:none}
   .tab{padding:6px 11px}
 }
+
+/* Plated prompt panel and paste helpers */
+.aiprompt{background:var(--accent-soft);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.aiprompt h3{margin:0;font-size:1rem;font-weight:700;color:var(--ink)}
+.aiprompt .how{color:var(--ink)}
+.prompt-text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;line-height:1.45;background:var(--surface)}
+.tip{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:.88rem;color:var(--muted)}
+.tip span{flex:1 1 220px;min-width:0}
+.lblrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.steps li b{font-weight:700}
