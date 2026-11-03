@@ -1,4 +1,4 @@
-# Plated by GiGi
+# Plated w/ GiGi
 
 A family recipe box for two phones. Save recipes from websites, photos of recipe cards, or AI chats; scale them to the pan you're using; and build a shared grocery list to shop at Harris Teeter or Walmart.
 

@@ -266,3 +266,25 @@ textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-
 .wake{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--accent)}
 .wake::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
 @media (prefers-reduced-motion:reduce){.steps li,.tick{transition:none}}
+
+/* Name: Plated w/ GiGi */
+.brand span{font-family:var(--f-display);font-size:1.05rem;text-transform:none;letter-spacing:0;color:var(--accent);font-weight:400}
+@media (max-width:480px){.brand span{display:inline;font-size:.95rem}.brand b{font-size:1.45rem}.tab{padding:6px 9px;font-size:.88rem}.top .wrap{gap:8px}}
+
+/* Ingredients ↔ steps */
+.stepref{display:inline-block;margin-left:8px;font-size:.72rem;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 8px;white-space:nowrap;vertical-align:1px;text-decoration:none}
+.ilist li.done .stepref{opacity:.7}
+.sdone{text-decoration:line-through}
+.stxt{display:flex;flex-direction:column;gap:8px;min-width:0}
+.adds{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;font-size:.88rem}
+.addlbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;color:var(--muted);margin-right:2px}
+.add{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--ink)}
+.add b{font-weight:700;font-variant-numeric:tabular-nums}
+.steps li.current .add{border-color:var(--accent)}
+.lcell{display:flex;flex-direction:column;gap:6px;min-width:0}
+.useslbl{display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.useslbl .in{font-size:.88rem;padding:6px 9px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink)}
+.rsec .lblrow h3{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+@media (max-width:480px){.tlong{display:none}.acct{width:34px;height:34px}}
+.useslbl{align-items:flex-start}.useslbl > span{padding-top:7px}
+.useslbl textarea.uses{min-height:34px}

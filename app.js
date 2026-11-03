@@ -468,16 +468,16 @@ const GOOGLE_G = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC10
 function viewGate(){
   if (!FB_READY){
     return h("section", {class:"gate"},
-      h("div", {class:"hd"}, h("h1", null, "Plated"), h("p", null, "The shared recipe box isn't connected yet.")),
+      h("div", {class:"hd"}, h("h1", null, "Plated w/ GiGi"), h("p", null, "The shared recipe box isn't connected yet.")),
       h("div", {class:"gb"},
         h("p", null, "To share recipes and the grocery list between phones, Plated needs its Firebase settings. Paste them into ", h("code", null, "config.js"), " in the GitHub repo. The README has the full steps."),
         h("p", null, "You can still try everything now. Recipes made this way stay in this browser."),
         h("div", {class:"row"}, h("button", {class:"btn primary", type:"button", onclick:startLocal}, "Use on this device only"))));
   }
   return h("section", {class:"gate"},
-    h("div", {class:"hd"}, h("h1", null, "Plated"), h("p", null, "The family recipe box and grocery list.")),
+    h("div", {class:"hd"}, h("h1", null, "Plated w/ GiGi"), h("p", null, "The family recipe box and grocery list.")),
     h("div", {class:"gb"},
-      h("p", null, "Sign in with your Google account. Only the family accounts on Plated's list can open the recipe box."),
+      h("p", null, "Sign in with your Google account. Only the family accounts on the list can open the recipe box."),
       h("div", null, h("button", {class:"btn primary gbtn", type:"button", onclick:signIn}, h("span", {html:GOOGLE_G, style:"display:inline-flex;background:#fff;border-radius:50%;padding:3px"}), "Sign in with Google")),
       S.authError ? h("p", {class:"err"}, S.authError) : null));
 }
@@ -562,6 +562,7 @@ function viewRecipe(){
   if (!r){ put(f, h("div", {class:"empty"}, h("h2", null, "Recipe not found"), h("p", null, "It may have been deleted."), h("button", {class:"btn", type:"button", onclick:() => go("recipes")}, "Back to the recipe box"))); return f; }
   if (!S.scale) S.scale = defaultScale(r);
   const sc = S.scale, factor = factorOf(r, sc);
+  const um = stepUses(r, factor);
   const onList = S.grocery.recipes.find(x => x.rid === r.id);
   const facts = [["Serves", servesText(r)], ["Prep", r.prepTime], ["Cook", r.cookTime], ["Total", r.totalTime], ["Pan", r.pan ? panName(r.pan) : ""]].filter(x => x[1]);
   const meta = h("div", null,
@@ -585,27 +586,31 @@ function viewRecipe(){
           h("button", {class:"btn ghost", type:"button", onclick:() => { S.confirmDel = true; render(); }}, "Delete"))
   ));
   const left = h("div", {class:"panel"}, h("h2", null, "Scale it"), scaler(r, sc, factor),
-    h("div", {class:"ings"}, h("h2", null, "Ingredients" + (factor !== 1 ? " · " + fmtFactor(factor) : "")), ingList(r, factor)));
+    h("div", {class:"ings"}, h("h2", null, "Ingredients" + (factor !== 1 ? " · " + fmtFactor(factor) : "")), ingList(r, factor, um)));
   const right = h("div", {class:"sect"}, h("h2", null, "Method"),
-    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map((t, i) => stepItem(t, i, r))) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
+    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map((t, i) => stepItem(t, i, r, um))) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
     r.notes ? h("div", {class:"notes"}, r.notes) : null);
-  put(f, cookBar(r), h("div", {class:"cols"}, left, right));
+  put(f, cookBar(r, um), h("div", {class:"cols"}, left, right));
   return f;
 }
-function stepItem(text, i, r){
+function stepItem(text, i, r, um){
   const st = getCook(r.id), done = st.steps.includes(i);
+  const adds = (um.steps[i] || []);
   const started = st.ings.length || st.steps.length;
   let next = -1; for (let k = 0; k < (r.steps || []).length; k++) if (!st.steps.includes(k)){ next = k; break; }
   const m = String(text).match(/^([^:.!?]{2,50}):(?:\s+([\s\S]+))?$/);
   return checkRow("ck-s-" + i, started && i === next ? "current" : "", done, () => toggleCook(r.id, "steps", i),
-    m ? h("span", null, h("b", null, m[1] + ":"), m[2] ? " " + m[2] : null) : h("span", null, text));
+    h("div", {class:"stxt"},
+      m ? h("span", null, h("b", null, m[1] + ":"), m[2] ? " " + m[2] : null) : h("span", null, text),
+      adds.length ? h("div", {class:"adds"}, h("span", {class:"addlbl"}, "Add"), adds.map(u => h("span", {class:"add"}, u.amt ? h("b", null, u.amt) : null, (u.amt ? " " : "") + u.name))) : null));
 }
-function cookBar(r){
+function cookBar(r, um){
   const st = getCook(r.id);
-  const nI = (r.ingredients || []).filter(x => { const p = parseLine(x.line); return p && !p.header; }).length, nS = (r.steps || []).length;
-  const any = st.ings.length || st.steps.length;
+  const idx = (r.ingredients || []).map((x, i) => { const p = parseLine(x.line); return p && !p.header ? i : -1; }).filter(i => i >= 0);
+  const nI = idx.length, nS = (r.steps || []).length, dI = idx.filter(i => ingDone(st, um, i)).length;
+  const any = st.ings.length || st.steps.length || st.off.length;
   return h("div", {class:"cookbar"},
-    h("span", {class:"cooktxt"}, any ? `${st.ings.length} of ${nI} ingredients · ${st.steps.length} of ${nS} steps done` : "Tap ingredients and steps to check them off as you cook."),
+    h("span", {class:"cooktxt"}, any ? `${dI} of ${nI} ingredients · ${st.steps.length} of ${nS} steps done` : "Tap a step when it's done. Its ingredients cross off with it."),
     S.wake ? h("span", {class:"wake"}, "Screen stays on") : null,
     any ? h("button", {class:"btn ghost sm", type:"button", onclick:() => resetCook(r.id)}, "Start over") : null);
 }
@@ -646,7 +651,7 @@ function customDims(prefix, o, set){
     h("label", {class:"f"}, o.shape === "round" ? "Diameter (in)" : "Width (in)", h("input", {class:"in", id:prefix + "-a", type:"number", min:"1", step:"0.5", inputmode:"decimal", value:o.a || "", onchange:e => set({a:+e.target.value})})),
     o.shape === "round" ? null : h("label", {class:"f"}, "Length (in)", h("input", {class:"in", id:prefix + "-b", type:"number", min:"1", step:"0.5", inputmode:"decimal", value:o.b || "", onchange:e => set({b:+e.target.value})})));
 }
-function ingList(r, factor){
+function ingList(r, factor, um){
   const ul = h("ul", {class:"ilist"});
   const st = getCook(r.id);
   (r.ingredients || []).forEach((ing, i) => {
@@ -654,12 +659,143 @@ function ingList(r, factor){
     if (!p) return;
     if (p.header){ put(ul, h("li", {class:"hdr"}, p.header)); return; }
     const a = amountOf(p, factor), orig = factor !== 1 ? amountOf(p, 1).text : "";
-    put(ul, checkRow("ck-i-" + i, "ck", st.ings.includes(i), () => toggleCook(r.id, "ings", i), [
+    const ss = um.ingSteps[i] || [];
+    put(ul, checkRow("ck-i-" + i, "ck", ingDone(st, um, i), () => toggleIng(r, um, i), [
       h("span", {class:"amt"}, a.text || "—", orig ? h("span", {class:"was"}, "was " + orig) : null),
-      h("span", {class:"itxt"}, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null)]));
+      h("span", {class:"itxt"}, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null,
+        ss.length ? h("span", {class:"stepref", title:"Added in " + (ss.length > 1 ? "steps " : "step ") + ss.map(x => x + 1).join(", ")},
+          ss.length > 1 ? "Steps " : "Step ", ss.map((si, j) => [j ? ", " : "", h("span", {class: st.steps.includes(si) ? "sdone" : ""}, String(si + 1))])) : null)]));
   });
   if (!ul.children.length) put(ul, h("li", null, h("span", null, "—"), h("span", {class:"note"}, "No ingredients saved.")));
   return ul;
+}
+
+/* ---------- which ingredients go in which step ---------- */
+const MATCH_STOP = new Set(["of","and","or","the","a","an","to","for","with","in","into","on","fresh","freshly","ground","large","small","medium","unsalted","salted","packed","light","dark","extra","virgin","boneless","skinless","shredded","grated","chopped","minced","diced","sliced","dry","dried","whole","plain","all","purpose","cold","warm","softened","melted","kosher","sea","fine","coarse","good","quality","about","some","your","each","more","few","optional","store","bought","homemade","package","packages","can","cans","jar","bag","box","cup","cups","tbsp","tsp","tablespoon","teaspoon","oz","lb","pound","ounce","gram","g","inch"]);
+const GENERIC = new Set(["sauce","oil","juice","powder","extract","stock","broth","water","seasoning","mix","paste","cheese","pepper","leave","leaf","zest","spice","cream","milk","flake","seed","chip","piece","stick","clove","sprig","bunch","head"]);
+// Words that describe an ingredient rather than name it; never matched on their own ("golden brown" isn't brown sugar)
+const MODIFIER = new Set(["brown","white","red","green","yellow","black","golden","sweet","hot","sour","heavy","baking","mexican","italian","greek","blend","sharp","mild","semisweet","bittersweet","whole","wheat","long","grain","short","flat","powdered","confectioner","granulated","cream","sauce","smoked","roasted","toasted","crushed","frozen","canned","raw","cooked","lean","firm","soft","thick","thin","boiling","ice","stick","fat","low","free","reduced","sodium","seedless","ripe","baby","french","english"]);
+function sing(w){
+  if (/ies$/.test(w) && w.length > 4) return w.slice(0, -3) + "y";
+  if (/(ches|shes|sses|xes|oes)$/.test(w)) return w.slice(0, -2);
+  if (/s$/.test(w) && !/(ss|us|is)$/.test(w) && w.length > 3) return w.slice(0, -1);
+  return w;
+}
+const normWords = t => String(t).toLowerCase().replace(/[‘’']/g, "").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean).map(sing);
+function ingPhrases(item){
+  const best = new Map();
+  const addP = (ph, sc, single) => { const o = best.get(ph); if (!o || o.s < sc) best.set(ph, {p:ph, s:sc, single:!!single}); };
+  for (const alt of cleanName(item).split(/\bor\b|\//i)){
+    const ws = normWords(alt).filter(w => !MATCH_STOP.has(w) && !/^\d/.test(w));
+    if (!ws.length) continue;
+    addP(ws.join(" "), 3);
+    if (ws.length > 2) addP(ws.slice(-2).join(" "), 2);
+    if (ws.length > 1) addP(ws[ws.length - 1], 1.5);
+    ws.forEach(w => addP(w, 1, true));
+  }
+  return [...best.values()];
+}
+function hintBefore(toks, ti){
+  const pre = toks.slice(Math.max(0, ti - 5), ti).join(" ");
+  if (/\b(remaining|rest|other half|second half|leftover|reserved)\b/.test(pre)) return {rest:true};
+  if (/\btwo third/.test(pre)) return {frac:2/3};
+  if (/\bthird\b/.test(pre)) return {frac:1/3};
+  if (/\bthree quarter/.test(pre)) return {frac:3/4};
+  if (/\bquarter\b/.test(pre)) return {frac:1/4};
+  if (/\bhalf\b/.test(pre)) return {frac:1/2};
+  return {};
+}
+function matchText(text, info){
+  const toks = normWords(text), content = [];
+  toks.forEach((w, i) => { if (!MATCH_STOP.has(w)) content.push({w, i}); });
+  const cands = [];
+  info.forEach((inf, k) => {
+    if (!inf) return;
+    for (const ph of inf.phrases){
+      if (ph.single && !inf.unique.has(ph.p)) continue;
+      const pw = ph.p.split(" ");
+      for (let j = 0; j + pw.length <= content.length; j++){
+        let ok = true;
+        for (let q = 0; q < pw.length; q++) if (content[j + q].w !== pw[q]){ ok = false; break; }
+        if (ok) cands.push({k, s:ph.s + pw.length * 0.01, from:j, to:j + pw.length - 1, ti:content[j].i});
+      }
+    }
+  });
+  cands.sort((a, b) => b.s - a.s || a.from - b.from);
+  const taken = [], res = new Map();
+  for (const c of cands){
+    const clash = taken.find(t => !(c.to < t.from || c.from > t.to));
+    if (clash && !(clash.s === c.s && clash.from === c.from && clash.to === c.to)) continue;
+    taken.push(c);
+    if (!res.has(c.k)) res.set(c.k, {k:c.k, hint:hintBefore(toks, c.ti)});
+  }
+  return [...res.values()];
+}
+function ingInfo(ings){
+  const parsed = ings.map(i => parseLine(i.line));
+  const info = parsed.map(p => p && !p.header && p.item ? {phrases:ingPhrases(p.item)} : null);
+  const wc = {};
+  info.forEach(inf => inf && new Set(inf.phrases.filter(x => x.single).map(x => x.p)).forEach(w => { wc[w] = (wc[w] || 0) + 1; }));
+  info.forEach(inf => { if (inf) inf.unique = new Set(inf.phrases.filter(x => x.single && wc[x.p] === 1 && x.p.length > 3 && !GENERIC.has(x.p) && !MODIFIER.has(x.p)).map(x => x.p)); });
+  return {parsed, info};
+}
+const scaleP = (p, f) => Object.assign({}, p, {qty: p.qty == null ? null : p.qty * f, qtyMax: p.qtyMax == null ? null : p.qtyMax * f});
+// For each step: the ingredients it adds and how much. Uses the recipe's own "Adds" lines when it has them, else reads the step text.
+function stepUses(r, factor){
+  const ings = r.ingredients || [], steps = r.steps || [];
+  const {parsed, info} = ingInfo(ings);
+  const per = steps.map(() => []), ingSteps = {};
+  const explicit = Array.isArray(r.uses) && r.uses.some(u => u && String(u).trim());
+  if (explicit){
+    steps.forEach((_, si) => {
+      String(r.uses[si] || "").split(/\s*;\s*/).map(x => x.trim()).filter(x => x && !/^(none|nothing|-|—)$/i.test(x)).forEach(u => {
+        const pu = parseLine(u) || {item:u};
+        const m = matchText(pu.item || u, info);
+        per[si].push({k: m.length ? m[0].k : -1, use:pu, raw:u});
+      });
+    });
+  } else {
+    const occ = {};
+    steps.forEach((t, si) => matchText(t, info).forEach(m => { (occ[m.k] = occ[m.k] || []).push({si, hint:m.hint}); }));
+    for (const key in occ){
+      const k = +key, list = occ[key];
+      const divided = /\bdivided\b/i.test(ings[k].line);
+      const hinted = list.some(o => o.hint.frac || o.hint.rest);
+      const keep = hinted || divided ? list : [list[0]];
+      const fracSum = keep.reduce((a, o) => a + (o.hint.frac || 0), 0);
+      const rests = keep.filter(o => o.hint.rest), plain = keep.filter(o => !o.hint.frac && !o.hint.rest);
+      keep.forEach(o => {
+        let f = null;
+        if (keep.length === 1) f = 1;
+        else if (o.hint.frac) f = o.hint.frac;
+        else if (o.hint.rest && !plain.length) f = Math.max(0, 1 - fracSum) / rests.length;
+        else if (!o.hint.rest && hinted && !rests.length) f = Math.max(0, 1 - fracSum) / plain.length;
+        per[o.si].push({k, frac:f, rest: !!o.hint.rest});
+      });
+    }
+  }
+  per.forEach((list, si) => {
+    list.sort((a, b) => (a.k < 0 ? 999 : a.k) - (b.k < 0 ? 999 : b.k));
+    list.forEach(u => { if (u.k >= 0) (ingSteps[u.k] = ingSteps[u.k] || []).includes(si) || ingSteps[u.k].push(si); });
+  });
+  const label = (u, si) => {
+    if (u.use){
+      if (u.use.qty != null) return {amt: amountOf(u.use, factor).text, name: u.use.item};
+      const p = u.k >= 0 ? parsed[u.k] : null;
+      if (p && p.qty != null && ingSteps[u.k].length === 1) return {amt: amountOf(p, factor).text, name: u.use.item || p.item};
+      return {amt:"", name: u.raw};
+    }
+    const p = parsed[u.k];
+    if (u.frac == null) return {amt: u.rest ? "remaining" : "some", name:p.item};
+    if (p.qty == null) return {amt:"", name:p.item};
+    return {amt: amountOf(scaleP(p, u.frac), factor).text, name:p.item};
+  };
+  return {steps: per.map((list, si) => list.map(u => Object.assign({k:u.k}, label(u, si)))), ingSteps, explicit};
+}
+// The "Adds" text for each step, as the review screen shows it
+function usesStrings(ingredients, steps){
+  const m = stepUses({ingredients, steps}, 1);
+  return m.steps.map(list => list.map(u => (u.amt ? u.amt + " " : "") + u.name).join("; "));
 }
 
 /* ---------- cooking checks: kept on this phone only, cleared after 6 hours ---------- */
@@ -667,20 +803,33 @@ const COOK_TTL = 6 * 3600 * 1000, cookMem = {};
 function getCook(rid){
   const m = cookMem[rid];
   if (m && (!m.at || Date.now() - m.at < COOK_TTL)) return m;
-  let st = {ings:[], steps:[], at:0};
-  try { const v = JSON.parse(localStorage.getItem("plated-cook-" + rid) || "null"); if (v && Date.now() - (v.at || 0) < COOK_TTL) st = {ings:v.ings || [], steps:v.steps || [], at:v.at}; } catch(e){}
+  let st = {ings:[], steps:[], off:[], at:0};
+  try { const v = JSON.parse(localStorage.getItem("plated-cook-" + rid) || "null"); if (v && Date.now() - (v.at || 0) < COOK_TTL) st = {ings:v.ings || [], steps:v.steps || [], off:v.off || [], at:v.at}; } catch(e){}
   return (cookMem[rid] = st);
 }
 function saveCook(rid, st){
   st.at = Date.now(); cookMem[rid] = st;
-  try { if (!st.ings.length && !st.steps.length) localStorage.removeItem("plated-cook-" + rid); else localStorage.setItem("plated-cook-" + rid, JSON.stringify(st)); } catch(e){}
+  st.off = st.off || [];
+  try { if (!st.ings.length && !st.steps.length && !st.off.length) localStorage.removeItem("plated-cook-" + rid); else localStorage.setItem("plated-cook-" + rid, JSON.stringify(st)); } catch(e){}
 }
 function toggleCook(rid, kind, i){
   const st = getCook(rid), a = st[kind], k = a.indexOf(i);
   if (k >= 0) a.splice(k, 1); else a.push(i);
   saveCook(rid, st); wantWake(true); render();
 }
-function resetCook(rid){ saveCook(rid, {ings:[], steps:[]}); render(); }
+function resetCook(rid){ saveCook(rid, {ings:[], steps:[], off:[]}); render(); }
+// An ingredient is crossed out when tapped, or once every step that uses it is done (a tap can undo either)
+function ingDone(st, um, i){
+  if (st.off.includes(i)) return false;
+  const ss = um.ingSteps[i];
+  return st.ings.includes(i) || !!(ss && ss.length && ss.every(si => st.steps.includes(si)));
+}
+function toggleIng(r, um, i){
+  const st = getCook(r.id), rm = (a, v) => { const k = a.indexOf(v); if (k >= 0) a.splice(k, 1); };
+  if (ingDone(st, um, i)){ rm(st.ings, i); if (ingDone(st, um, i)) st.off.push(i); }
+  else { rm(st.off, i); if (!ingDone(st, um, i)) st.ings.push(i); }
+  saveCook(r.id, st); wantWake(true); render();
+}
 function checkRow(id, cls, on, onToggle, kids){
   return h("li", {id, class: cls + (on ? " done" : ""), role:"checkbox", tabindex:"0", "aria-checked": String(on),
     onclick:onToggle, onkeydown:e => { if (e.key === " " || e.key === "Enter"){ e.preventDefault(); onToggle(); } }}, kids);
@@ -898,9 +1047,10 @@ function draftFrom(r){
   const ings = (r.ingredients || []).map(i => i.line), steps = (r.steps || []).slice();
   return {title:r.title || "", serves: servesText(r), prepTime:r.prepTime || "", cookTime:r.cookTime || "", totalTime:r.totalTime || "",
     pan: r.pan ? clone(r.pan) : null, ings: ings.length ? ings : [""], steps: steps.length ? steps : [""],
+    uses: steps.length ? (Array.isArray(r.uses) && r.uses.some(u => u) ? steps.map((_, i) => r.uses[i] || "") : usesStrings(r.ingredients || [], steps)) : [""],
     notes:r.notes || "", url:r.url || "", cats:Object.fromEntries((r.ingredients || []).map(i => [i.line.trim(), i.category])), example: !!r.example, createdAt:r.createdAt};
 }
-function blankDraft(){ return {title:"", serves:"", prepTime:"", cookTime:"", totalTime:"", pan:null, ings:["", "", ""], steps:[""], notes:"", url:"", cats:{}}; }
+function blankDraft(){ return {title:"", serves:"", prepTime:"", cookTime:"", totalTime:"", pan:null, ings:["", "", ""], steps:[""], uses:[""], notes:"", url:"", cats:{}}; }
 function renderSheet(){
   const root = $("#sheetroot"); root.textContent = "";
   const sh = S.sheet; if (!sh) return;
@@ -1011,7 +1161,7 @@ function extractPrompt(kind, text){
   const what = kind === "card" ? "the attached photo(s) of a recipe card (handwritten or printed)" : kind === "cardtext" ? "text copied from a photo of a recipe card with phone text recognition, which may have line breaks in odd places and a few misread words" : kind === "ai" ? "a conversation with an AI assistant. Use the final version of the recipe the conversation settled on" : "text copied from a recipe web page, which may include ads, stories and comments to ignore";
   return `Extract one recipe from ${what}.
 Reply with only a JSON object in exactly this shape:
-{"title": string, "servings": string like "4" or "2–3" or "", "prepTime": string, "cookTime": string, "totalTime": string, "pan": {"shape": "rect" or "round", "width": number, "length": number} or null, "ingredients": [{"line": string, "category": string}], "steps": [string], "notes": string}
+{"title": string, "servings": string like "4" or "2–3" or "", "prepTime": string, "cookTime": string, "totalTime": string, "pan": {"shape": "rect" or "round", "width": number, "length": number} or null, "ingredients": [{"line": string, "category": string}], "steps": [string], "uses": [string], "notes": string}
 Rules:
 - "title": the recipe's name. If none is given, write a short descriptive name in title case (2–6 words).
 - "prepTime", "cookTime", "totalTime": short text like "15 min" or "1 hr 10 min" when stated or clearly implied, else "". A single overall time ("about 25 minutes") goes in "totalTime".
@@ -1019,6 +1169,7 @@ Rules:
 - "ingredients[].line": one ingredient each, written like "2 1/2 cups all-purpose flour, sifted" with the quantity first, then the unit, then the item, then any prep after a comma. Use plain fractions like 1/2 (not ½). Keep amounts exactly as written. For a section heading such as "For the frosting", use a line ending with a colon and category "Other".
 - "category": one of ${CATS.map(c => '"' + c + '"').join(", ")}.
 - "steps": the method in order, one step per item, without step numbers.
+- "uses": one string per step, in the same order as "steps": the ingredients added in that step with the amount used in that step, separated by semicolons ("1/2 cup unsalted butter; 1 large egg"), or "" if the step adds nothing. Split an ingredient's amount across steps when the recipe uses it in parts.
 - "notes": intro tips, variations, substitutions, storage and source credits worth keeping, as short paragraphs separated by a blank line, else "". Never put these in "steps". Leave out greetings and sign-offs.
 - If handwriting is hard to read, give your best reading and put "(?)" right after the uncertain word.
 - If there is no recipe, reply {"error": "no recipe"}.` + (text ? "\n\nHere is the content:\n<<<\n" + text.slice(0, 60000) + "\n>>>" : "");
@@ -1051,6 +1202,7 @@ function applyDraft(sh, data){
     title: str(data.title), serves: str(data.serves || data.servings).replace(/\s*(?:-|to)\s*/, "–"),
     prepTime: str(data.prepTime), cookTime: str(data.cookTime), totalTime: str(data.totalTime),
     pan: panFromDims(data.pan), ings: ings.length ? ings.map(i => i.line) : [""], steps: steps.length ? steps : [""],
+    uses: !steps.length ? [""] : Array.isArray(data.uses) && data.uses.some(u => u && String(u).trim()) ? steps.map((_, i) => str(data.uses[i])) : usesStrings(ings, steps),
     notes: str(data.notes), url: sh.url || "", cats: Object.fromEntries(ings.map(i => [i.line, i.category]))
   };
   sh.step = "review"; render();
@@ -1071,6 +1223,7 @@ Ingredients:
 
 Steps:
 1.
+   Adds:
 
 Notes:
 -
@@ -1082,6 +1235,7 @@ Rules:
 - Pan: the baking pan or dish if it uses one, like 9x13 dish, 8x8 square, 9 inch round or 9x5 loaf pan. Otherwise write none.
 - Ingredients: one per line, amount first, then unit, then item, then prep after a comma (2 1/2 cups all-purpose flour, sifted). Use plain fractions like 1/2. For a group, put a line like "For the sauce:" before its ingredients.
 - Steps: one numbered step per action, each a sentence or short paragraph. No sub-bullets: fold any sub-points into the step.
+- Adds: under every step, a line starting "Adds:" listing each ingredient added in that step with the amount used in that step, separated by semicolons (Adds: 1/2 cup unsalted butter; 1 large egg). If an ingredient is split across steps, give each step its own share (1/2 cup cheese in one step, the other 1/2 cup in a later one). Write "Adds: none" for a step that adds nothing.
 - Notes: tips, swaps, variations and storage, one per line. Write none if there aren't any.
 - Keep every amount exactly as in the original. For a handwritten card, put (?) after any word you can't read for sure.
 
@@ -1132,13 +1286,17 @@ function parsePlated(text){
     else if (sec === "notes"){ const v = l.replace(/^[-–•*·]\s*/, "").trim(); if (v && !blank(v)) notes.push(v); }
   }
   const numbered = stepLines.some(l => /^(step\s*)?\d+[.):]\s*/i.test(l));
+  out.uses = [];
   for (const l of stepLines){
+    const ad = l.replace(/^[-–•*·]\s*/, "").match(/^(?:adds?|uses?|add in|ingredients?)\s*:\s*(.*)$/i);
+    if (ad){ if (out.steps.length) out.uses[out.steps.length - 1] = blank(ad[1]) || /^none$/i.test(ad[1].trim()) ? "" : ad[1].trim(); continue; }
     const num = l.match(/^(?:step\s*)?\d+[.):]\s*(.*)$/i);
     const v = (num ? num[1] : l.replace(/^[-–•*·]\s*/, "")).trim();
     if (!v || blank(v)) continue;
     if (!numbered || num || !out.steps.length) out.steps.push(v);
     else out.steps[out.steps.length - 1] = joinStep(out.steps[out.steps.length - 1], v);
   }
+  out.uses = out.steps.map((_, i) => out.uses[i] || "");
   out.notes = notes.join("\n\n");
   return out;
 }
@@ -1261,34 +1419,39 @@ function localExtract(text){
     pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
     ingredients: ings.map(l => ({line:l, category:""})), steps, notes: allNotes.join("\n\n")};
 }
-function listEditor(kind, arr){
+function listEditor(kind, arr, pair){
   const isStep = kind === "steps";
+  const sp = (i, del, ...items) => { if (pair){ while (pair.length < arr.length) pair.push(""); pair.splice(i, del, ...items.map(() => "")); } arr.splice(i, del, ...items); };
   const focusRow = i => setTimeout(() => { const el = document.getElementById("d-" + kind + "-" + i); if (el){ el.focus(); grow(el); } }, 0);
   const wrap = h("div", {class:"ledit"});
   arr.forEach((v, i) => {
     put(wrap, h("div", {class:"lrow"},
       h("span", {class: isStep ? "lnum" : "lnum bul", "aria-hidden":"true"}, isStep ? String(i + 1) : "•"),
-      h("textarea", {class:"in auto", id:"d-" + kind + "-" + i, rows:"1", "aria-label": (isStep ? "Step " : "Ingredient ") + (i + 1),
-        placeholder: isStep ? (i === 0 ? "Heat the oven to 350°F." : "Next step") : (i === 0 ? "2 cups all-purpose flour" : i === 1 ? "1 tsp baking soda" : "Next ingredient"),
-        oninput:e => { arr[i] = e.target.value; grow(e.target); },
-        onkeydown:e => {
-          if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); const el = e.target, at = el.selectionStart;
-            arr[i] = el.value.slice(0, at).trimEnd(); arr.splice(i + 1, 0, el.value.slice(at).trimStart()); render(); focusRow(i + 1); }
-          else if (e.key === "Backspace" && e.target.value === "" && arr.length > 1){ e.preventDefault(); arr.splice(i, 1); render(); focusRow(Math.max(0, i - 1)); }
-        },
-        onpaste:e => {
-          const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
-          if (!/\n/.test(t.trim())) return;
-          e.preventDefault();
-          const parts = isStep ? t.split(/\n\s*\n|\n(?=\s*(?:step\s*)?\d+[.)]\s)/i) : t.split(/\r?\n/);
-          const clean = parts.map(x => x.replace(/\s*\n\s*/g, " ").replace(/^[-–•*·▢☐□]\s*/, "").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
-          if (!clean.length) return;
-          if (arr[i].trim()) arr.splice(i + 1, 0, ...clean); else arr.splice(i, 1, ...clean);
-          render(); focusRow(i + clean.length - (arr[i] === clean[0] ? 1 : 0));
-        }}, v),
-      h("button", {class:"x", type:"button", "aria-label":"Remove " + (isStep ? "step " : "ingredient ") + (i + 1), onclick:() => { arr.splice(i, 1); if (!arr.length) arr.push(""); render(); }}, "×")));
+      h("div", {class:"lcell"},
+        h("textarea", {class:"in auto", id:"d-" + kind + "-" + i, rows:"1", "aria-label": (isStep ? "Step " : "Ingredient ") + (i + 1),
+          placeholder: isStep ? (i === 0 ? "Heat the oven to 350°F." : "Next step") : (i === 0 ? "2 cups all-purpose flour" : i === 1 ? "1 tsp baking soda" : "Next ingredient"),
+          oninput:e => { arr[i] = e.target.value; grow(e.target); },
+          onkeydown:e => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); const el = e.target, at = el.selectionStart;
+              arr[i] = el.value.slice(0, at).trimEnd(); sp(i + 1, 0, el.value.slice(at).trimStart()); render(); focusRow(i + 1); }
+            else if (e.key === "Backspace" && e.target.value === "" && arr.length > 1){ e.preventDefault(); sp(i, 1); render(); focusRow(Math.max(0, i - 1)); }
+          },
+          onpaste:e => {
+            const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
+            if (!/\n/.test(t.trim())) return;
+            e.preventDefault();
+            const parts = isStep ? t.split(/\n\s*\n|\n(?=\s*(?:step\s*)?\d+[.)]\s)/i) : t.split(/\r?\n/);
+            const clean = parts.map(x => x.replace(/\s*\n\s*/g, " ").replace(/^[-–•*·▢☐□]\s*/, "").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
+            if (!clean.length) return;
+            const keepFirst = !!arr[i].trim();
+            if (keepFirst) sp(i + 1, 0, ...clean); else sp(i, 1, ...clean);
+            render(); focusRow(i + clean.length - (keepFirst ? 0 : 1));
+          }}, v),
+        isStep && pair ? h("label", {class:"useslbl"}, h("span", null, "Adds"),
+          h("textarea", {class:"in uses auto", id:"d-uses-" + i, rows:"1", placeholder:"What goes in at this step, e.g. 1/2 cup butter; 2 eggs", oninput:e => { pair[i] = e.target.value.replace(/\n/g, " "); grow(e.target); }, onkeydown:e => { if (e.key === "Enter") e.preventDefault(); }}, pair[i] || "")) : null),
+      h("button", {class:"x", type:"button", "aria-label":"Remove " + (isStep ? "step " : "ingredient ") + (i + 1), onclick:() => { sp(i, 1); if (!arr.length){ arr.push(""); if (pair) pair.push(""); } render(); }}, "×")));
   });
-  put(wrap, h("button", {class:"btn ghost sm addline", type:"button", onclick:() => { arr.push(""); render(); focusRow(arr.length - 1); }}, isStep ? "+ Add a step" : "+ Add an ingredient"));
+  put(wrap, h("button", {class:"btn ghost sm addline", type:"button", onclick:() => { sp(arr.length, 0, ""); render(); focusRow(arr.length - 1); }}, isStep ? "+ Add a step" : "+ Add an ingredient"));
   return wrap;
 }
 function reviewStep(sh, body, foot){
@@ -1311,7 +1474,13 @@ function reviewStep(sh, body, foot){
         d.pan ? h("label", {class:"f", style:"flex:1 1 90px"}, "Pans", h("select", {class:"in", id:"d-count", onchange:e => { d.pan.count = +e.target.value; }}, [1,2,3,4].map(n => h("option", {value:n, selected:(d.pan.count || 1) === n}, String(n))))) : null),
       d.pan && d.pan.k === "custom" ? customDims("d", d.pan, patch => { Object.assign(d.pan, patch); render(); }) : null),
     h("section", {class:"rsec"}, h("h3", null, "Ingredients"), h("p", {class:"note", style:"margin:-4px 0 0"}, "One per row. Return adds a row; a heading like “For the glaze:” ends with a colon."), listEditor("ings", d.ings)),
-    h("section", {class:"rsec"}, h("h3", null, "Steps"), listEditor("steps", d.steps)),
+    h("section", {class:"rsec"},
+      h("div", {class:"lblrow"}, h("h3", null, "Steps"),
+        h("button", {class:"btn ghost sm", type:"button", onclick:() => {
+          d.uses = usesStrings(d.ings.filter(x => x.trim()).map(line => ({line})), d.steps); render(); toast("Ingredients matched to steps. Check the Adds lines.");
+        }}, "Match ingredients to steps")),
+      h("p", {class:"note", style:"margin:-4px 0 0"}, "Each step's Adds line lists what goes in at that step, so nothing gets added too early."),
+      listEditor("steps", d.steps, d.uses || (d.uses = d.steps.map(() => "")))),
     h("section", {class:"rsec"}, h("h3", null, "Notes"), h("textarea", {class:"in auto", id:"d-notes", rows:"2", placeholder:"Tips, swaps, variations", "aria-label":"Notes", oninput:e => { d.notes = e.target.value; grow(e.target); }}, d.notes)),
     h("label", {class:"f"}, "Source link", h("input", {class:"in", id:"d-url", type:"url", placeholder:"https://", value:d.url, oninput:e => { d.url = e.target.value; }})));
   if (sh.error) put(body, h("p", {class:"err"}, sh.error));
@@ -1323,11 +1492,12 @@ function reviewStep(sh, body, foot){
       if (!lines.length){ sh.error = "Add at least one ingredient."; render(); return; }
       if (d.pan && d.pan.k === "custom" && !(+d.pan.a > 0 && (d.pan.shape === "round" || +d.pan.b > 0))){ sh.error = "Enter the pan's size in inches, or pick No pan."; render(); return; }
       const ingredients = lines.map(l => { const p = parseLine(l); const c = d.cats[l]; return {line:l, category: CATS.includes(c) ? c : (p && p.header ? "Other" : categorize((p && p.item) || l))}; });
-      const steps = d.steps.map(x => String(x).replace(/\s*\n\s*/g, " ").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim()).filter(Boolean);
+      const pairs = d.steps.map((x, i) => ({t: String(x).replace(/\s*\n\s*/g, " ").replace(/^(step\s*)?\d+[.):]\s*/i, "").trim(), u: String((d.uses || [])[i] || "").trim()})).filter(x => x.t);
+      const steps = pairs.map(x => x.t), uses = pairs.map(x => x.u);
       const pan = d.pan ? (d.pan.k === "custom" ? {k:"custom", shape:d.pan.shape, a:+d.pan.a, b: d.pan.shape === "round" ? +d.pan.a : +d.pan.b, count:d.pan.count || 1} : Object.assign({}, d.pan, {count:d.pan.count || 1})) : null;
       const serves = d.serves.trim().replace(/^serves\s*/i, ""), sm = serves.match(/\d+(?:\.\d+)?/);
       const rec = {title:d.title.trim(), source: sh.kind, serves, servings: sm ? +sm[0] : null,
-        prepTime:d.prepTime.trim(), cookTime:d.cookTime.trim(), totalTime:d.totalTime.trim(), pan, ingredients, steps, notes:d.notes.trim(), url:d.url.trim()};
+        prepTime:d.prepTime.trim(), cookTime:d.cookTime.trim(), totalTime:d.totalTime.trim(), pan, ingredients, steps, uses: uses.some(Boolean) ? uses : [], notes:d.notes.trim(), url:d.url.trim()};
       if (sh.editingId){ rec.id = sh.editingId; if (d.createdAt) rec.createdAt = d.createdAt; if (d.example) rec.example = true; }
       const id = saveRecipe(rec), editing = !!sh.editingId;
       closeSheet(); S.scale = null;

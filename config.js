@@ -1,4 +1,4 @@
-// Plated by GiGi settings.
+// Plated w/ GiGi settings.
 // The Firebase web config is safe to publish: it only identifies the project.
 // Access is locked by the Firestore rules (see firestore.rules), which allow
 // only the family's Google accounts.
