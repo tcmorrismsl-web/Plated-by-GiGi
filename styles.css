@@ -247,3 +247,23 @@ textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-
 .tip span{flex:1 1 220px;min-width:0}
 .lblrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .steps li b{font-weight:700}
+
+/* Cooking checks: tap ingredients and steps as you go */
+.ilist li.ck{grid-template-columns:20px 8.5rem minmax(0,1fr);gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:6px}
+@media (max-width:420px){.ilist li.ck{grid-template-columns:20px 6.4rem minmax(0,1fr)}}
+.tick{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);display:inline-flex;align-items:center;justify-content:center;align-self:center;transition:background .12s,border-color .12s}
+.done .tick{background:var(--accent);border-color:var(--accent)}
+.done .tick::after{content:"";width:4px;height:8px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
+.ilist li.done .amt,.ilist li.done .itxt{color:var(--muted);text-decoration:line-through;text-decoration-thickness:1.5px}
+.ilist li.done .was,.ilist li.done .hint{text-decoration:none}
+.steps li{cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:10px;padding:8px 10px;margin:-8px -10px;transition:opacity .15s,background .15s}
+.steps li.done{opacity:.45}
+.steps li.done::before{content:"✓"}
+.steps li.current{background:var(--accent-soft)}
+.steps li.current::before{background:var(--accent);color:var(--accent-ink);border-radius:50%;width:1.9rem;height:1.9rem;display:inline-flex;align-items:center;justify-content:center;font-size:1.05rem;line-height:1}
+@media (hover:hover){.ilist li.ck:hover,.steps li:not(.current):hover{background:var(--surface-2)}}
+.cookbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:-8px 0 16px;font-size:.88rem;color:var(--muted)}
+.cooktxt{flex:1 1 240px;min-width:0;font-variant-numeric:tabular-nums}
+.wake{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--accent)}
+.wake::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+@media (prefers-reduced-motion:reduce){.steps li,.tick{transition:none}}

@@ -439,6 +439,7 @@ function keepFocus(fn){
   if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({preventScroll:true}); if (sel) try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
 }
 function render(){
+  wantWake(S.view === "recipe" && (S.mode === "db" || S.mode === "local") && S.recipes.some(x => x.id === S.rid));
   keepFocus(() => {
     const inApp = S.mode === "db" || S.mode === "local";
     $("#tabs").hidden = !inApp;
@@ -586,14 +587,27 @@ function viewRecipe(){
   const left = h("div", {class:"panel"}, h("h2", null, "Scale it"), scaler(r, sc, factor),
     h("div", {class:"ings"}, h("h2", null, "Ingredients" + (factor !== 1 ? " · " + fmtFactor(factor) : "")), ingList(r, factor)));
   const right = h("div", {class:"sect"}, h("h2", null, "Method"),
-    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map(stepItem)) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
+    (r.steps || []).length ? h("ol", {class:"steps"}, r.steps.map((t, i) => stepItem(t, i, r))) : h("p", {class:"note"}, "No steps saved. Tap Edit to add them."),
     r.notes ? h("div", {class:"notes"}, r.notes) : null);
-  put(f, h("div", {class:"cols"}, left, right));
+  put(f, cookBar(r), h("div", {class:"cols"}, left, right));
   return f;
 }
-function stepItem(text){
+function stepItem(text, i, r){
+  const st = getCook(r.id), done = st.steps.includes(i);
+  const started = st.ings.length || st.steps.length;
+  let next = -1; for (let k = 0; k < (r.steps || []).length; k++) if (!st.steps.includes(k)){ next = k; break; }
   const m = String(text).match(/^([^:.!?]{2,50}):(?:\s+([\s\S]+))?$/);
-  return h("li", null, m ? h("span", null, h("b", null, m[1] + ":"), m[2] ? " " + m[2] : null) : h("span", null, text));
+  return checkRow("ck-s-" + i, started && i === next ? "current" : "", done, () => toggleCook(r.id, "steps", i),
+    m ? h("span", null, h("b", null, m[1] + ":"), m[2] ? " " + m[2] : null) : h("span", null, text));
+}
+function cookBar(r){
+  const st = getCook(r.id);
+  const nI = (r.ingredients || []).filter(x => { const p = parseLine(x.line); return p && !p.header; }).length, nS = (r.steps || []).length;
+  const any = st.ings.length || st.steps.length;
+  return h("div", {class:"cookbar"},
+    h("span", {class:"cooktxt"}, any ? `${st.ings.length} of ${nI} ingredients · ${st.steps.length} of ${nS} steps done` : "Tap ingredients and steps to check them off as you cook."),
+    S.wake ? h("span", {class:"wake"}, "Screen stays on") : null,
+    any ? h("button", {class:"btn ghost sm", type:"button", onclick:() => resetCook(r.id)}, "Start over") : null);
 }
 function scaler(r, sc, factor){
   const set = patch => { Object.assign(S.scale, patch); render(); };
@@ -634,18 +648,60 @@ function customDims(prefix, o, set){
 }
 function ingList(r, factor){
   const ul = h("ul", {class:"ilist"});
-  for (const ing of r.ingredients || []){
+  const st = getCook(r.id);
+  (r.ingredients || []).forEach((ing, i) => {
     const p = parseLine(ing.line);
-    if (!p) continue;
-    if (p.header){ put(ul, h("li", {class:"hdr"}, p.header)); continue; }
+    if (!p) return;
+    if (p.header){ put(ul, h("li", {class:"hdr"}, p.header)); return; }
     const a = amountOf(p, factor), orig = factor !== 1 ? amountOf(p, 1).text : "";
-    put(ul, h("li", null,
+    put(ul, checkRow("ck-i-" + i, "ck", st.ings.includes(i), () => toggleCook(r.id, "ings", i), [
+      h("span", {class:"tick", "aria-hidden":"true"}),
       h("span", {class:"amt"}, a.text || "—", orig ? h("span", {class:"was"}, "was " + orig) : null),
-      h("span", null, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null)));
-  }
+      h("span", {class:"itxt"}, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null)]));
+  });
   if (!ul.children.length) put(ul, h("li", null, h("span", null, "—"), h("span", {class:"note"}, "No ingredients saved.")));
   return ul;
 }
+
+/* ---------- cooking checks: kept on this phone only, cleared after 6 hours ---------- */
+const COOK_TTL = 6 * 3600 * 1000, cookMem = {};
+function getCook(rid){
+  const m = cookMem[rid];
+  if (m && (!m.at || Date.now() - m.at < COOK_TTL)) return m;
+  let st = {ings:[], steps:[], at:0};
+  try { const v = JSON.parse(localStorage.getItem("plated-cook-" + rid) || "null"); if (v && Date.now() - (v.at || 0) < COOK_TTL) st = {ings:v.ings || [], steps:v.steps || [], at:v.at}; } catch(e){}
+  return (cookMem[rid] = st);
+}
+function saveCook(rid, st){
+  st.at = Date.now(); cookMem[rid] = st;
+  try { if (!st.ings.length && !st.steps.length) localStorage.removeItem("plated-cook-" + rid); else localStorage.setItem("plated-cook-" + rid, JSON.stringify(st)); } catch(e){}
+}
+function toggleCook(rid, kind, i){
+  const st = getCook(rid), a = st[kind], k = a.indexOf(i);
+  if (k >= 0) a.splice(k, 1); else a.push(i);
+  saveCook(rid, st); wantWake(true); render();
+}
+function resetCook(rid){ saveCook(rid, {ings:[], steps:[]}); render(); }
+function checkRow(id, cls, on, onToggle, kids){
+  return h("li", {id, class: cls + (on ? " done" : ""), role:"checkbox", tabindex:"0", "aria-checked": String(on),
+    onclick:onToggle, onkeydown:e => { if (e.key === " " || e.key === "Enter"){ e.preventDefault(); onToggle(); } }}, kids);
+}
+let wakeLock = null, wakePending = false, wakeWanted = false;
+async function wantWake(on){
+  wakeWanted = on;
+  if (!("wakeLock" in navigator)) return;
+  if (on && !wakeLock && !wakePending && document.visibilityState === "visible"){
+    wakePending = true;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; if (S.wake){ S.wake = false; if (S.view === "recipe") render(); } });
+      if (!wakeWanted){ wakeLock.release(); return; }
+      S.wake = true; render();
+    } catch(e){ S.wake = false; }
+    finally { wakePending = false; }
+  } else if (!on && wakeLock){ const l = wakeLock; wakeLock = null; S.wake = false; try { await l.release(); } catch(e){} }
+}
+document.addEventListener("visibilitychange", () => { if (wakeWanted && document.visibilityState === "visible") wantWake(true); });
 
 /* ---------- view: grocery ---------- */
 function viewList(){
