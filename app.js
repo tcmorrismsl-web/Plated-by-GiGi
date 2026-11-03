@@ -655,7 +655,6 @@ function ingList(r, factor){
     if (p.header){ put(ul, h("li", {class:"hdr"}, p.header)); return; }
     const a = amountOf(p, factor), orig = factor !== 1 ? amountOf(p, 1).text : "";
     put(ul, checkRow("ck-i-" + i, "ck", st.ings.includes(i), () => toggleCook(r.id, "ings", i), [
-      h("span", {class:"tick", "aria-hidden":"true"}),
       h("span", {class:"amt"}, a.text || "—", orig ? h("span", {class:"was"}, "was " + orig) : null),
       h("span", {class:"itxt"}, p.item, p.note ? h("span", {class:"inote"}, ", " + p.note) : null, a.hint ? h("span", {class:"hint"}, a.hint) : null)]));
   });

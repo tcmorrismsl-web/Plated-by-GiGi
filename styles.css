@@ -249,8 +249,7 @@ textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-
 .steps li b{font-weight:700}
 
 /* Cooking checks: tap ingredients and steps as you go */
-.ilist li.ck{grid-template-columns:20px 8.5rem minmax(0,1fr);gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:6px}
-@media (max-width:420px){.ilist li.ck{grid-template-columns:20px 6.4rem minmax(0,1fr)}}
+.ilist li.ck{cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:6px}
 .tick{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);display:inline-flex;align-items:center;justify-content:center;align-self:center;transition:background .12s,border-color .12s}
 .done .tick{background:var(--accent);border-color:var(--accent)}
 .done .tick::after{content:"";width:4px;height:8px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
