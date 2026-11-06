@@ -288,3 +288,35 @@ textarea.auto{resize:none;overflow:hidden;min-height:40px;line-height:1.4;field-
 @media (max-width:480px){.tlong{display:none}.acct{width:34px;height:34px}}
 .useslbl{align-items:flex-start}.useslbl > span{padding-top:7px}
 .useslbl textarea.uses{min-height:34px}
+
+/* No zooming: iPhone zooms into any text box under 16px, and double-tap zooms the page */
+html{touch-action:manipulation}
+@media (pointer:coarse){input,select,textarea,.in{font-size:16px !important}}
+
+/* Saved grocery items */
+.savedbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;flex-direction:column;gap:10px}
+.savedbox h3{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:8px}
+.scount{font-variant-numeric:tabular-nums;background:var(--surface-2);color:var(--ink);border-radius:999px;padding:0 7px;font-size:.72rem;letter-spacing:0}
+.schips{display:flex;flex-wrap:wrap;gap:8px}
+.schip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px 6px 8px;font-size:.9rem;cursor:pointer;max-width:100%;min-height:36px}
+.schip span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.schip:hover{border-color:var(--accent)}
+.schip .sicon{width:20px;height:20px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+.schip.on{background:var(--accent-soft);border-color:transparent;color:var(--muted)}
+.schip.on .sicon{background:var(--accent);color:var(--accent-ink)}
+.schip.editing{cursor:default;padding-right:4px}
+.star{border:0;background:transparent;font-size:1.25rem;line-height:1;color:var(--muted);cursor:pointer;width:32px;height:32px;border-radius:8px;flex:none}
+.star:hover{background:var(--surface-2)}
+.star.on{color:#D69B26}
+.addrow{flex-wrap:wrap}
+.savechk{display:flex;align-items:center;gap:8px;font-size:.88rem;color:var(--muted);flex-basis:100%}
+.savechk input{width:18px;height:18px;accent-color:var(--accent)}
+@media (max-width:420px){
+  .top .wrap{gap:6px}
+  .brand{gap:5px}
+  .brand b{font-size:1.3rem}
+  .brand span{font-size:.85rem}
+  .tabs{padding:2px}
+  .tab{padding:6px 8px;font-size:.85rem;gap:4px}
+  .acct{width:32px;height:32px}
+}

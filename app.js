@@ -285,11 +285,11 @@ function emptyGrocery(){ return {items:[], recipes:[], store:"ht"}; }
 /* ---------- storage: this device only ---------- */
 const LS_KEY = "plated-by-gigi-v1";
 function lsRead(){ try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch(e){ return null; } }
-function lsWrite(){ try { localStorage.setItem(LS_KEY, JSON.stringify({recipes:S.recipes, grocery:S.grocery})); } catch(e){} }
+function lsWrite(){ try { localStorage.setItem(LS_KEY, JSON.stringify({recipes:S.recipes, grocery:S.grocery, saved:S.saved || []})); } catch(e){} }
 function startLocal(){
   S.mode = "local";
   const d = lsRead();
-  if (d){ S.recipes = d.recipes || []; S.grocery = d.grocery || emptyGrocery(); }
+  if (d){ S.recipes = d.recipes || []; S.grocery = d.grocery || emptyGrocery(); S.saved = d.saved || []; }
   else { S.recipes = EXAMPLES.map((r, i) => ({...clone(r), id: uid(), createdAt: Date.now() - i, updatedAt: Date.now() - i})); lsWrite(); }
   S.loadedR = true;
   render();
@@ -309,7 +309,7 @@ function startFirebase(){
   auth.onAuthStateChanged(u => {
     stopSubs();
     S.user = u;
-    S.recipes = []; S.grocery = emptyGrocery(); S.loadedR = false; S.dbError = "";
+    S.recipes = []; S.grocery = emptyGrocery(); S.saved = []; S.loadedR = false; S.dbError = "";
     if (!u){ S.mode = "gate"; render(); return; }
     S.mode = "db"; S.authError = "";
     subscribe();
@@ -328,6 +328,10 @@ function subscribe(){
   }, dbFail));
   unsubs.push(house().collection("lists").doc("grocery").onSnapshot(snap => {
     S.grocery = snap.exists ? Object.assign(emptyGrocery(), snap.data()) : emptyGrocery();
+    render();
+  }, dbFail));
+  unsubs.push(house().collection("lists").doc("saved").onSnapshot(snap => {
+    S.saved = snap.exists && Array.isArray(snap.data().items) ? snap.data().items : [];
     render();
   }, dbFail));
 }
@@ -896,10 +900,11 @@ function viewList(){
     put(f, h("div", {class:"empty"}, h("h2", null, "The list is empty"),
       h("p", null, "Open a recipe, scale it to your pan, and tap Add to grocery list. Ingredients from every recipe you add are combined here so you can check what you already have."),
       h("div", {class:"row"}, h("button", {class:"btn primary", type:"button", onclick:() => go("recipes")}, "Go to recipes"))),
-      addItemRow());
+      savedBox(), addItemRow());
     return f;
   }
   const main = h("div", null);
+  put(main, savedBox());
   if (g.recipes.length) put(main, h("div", {class:"rchips"}, g.recipes.map(rc => h("span", {class:"rchip"},
     h("span", null, rc.title), h("small", null, rc.label || fmtFactor(rc.factor)),
     h("button", {class:"x", type:"button", "aria-label":"Remove " + rc.title + " from the list", onclick:() => { saveGrocery(removeRecipeFromList(clone(S.grocery), rc.rid)); toast("Removed " + rc.title); }}, "×")))));
@@ -934,27 +939,83 @@ function groceryRow(it){
       h("div", {class:"sub"}, [amt, from.length ? "for " + from.join(", ") : (it.manual ? "added by hand" : "")].filter(Boolean).join(" · "),
         it.status === "need" ? h("span", null, " · ", h("a", {class:"find", href: store.url(searchTerm(it)), target:"_blank", rel:"noopener"}, "Find at " + store.name + " ↗")) : null)),
     h("div", {class:"row", style:"gap:6px;flex-wrap:nowrap"},
+      h("button", {class:"star" + (isSaved(it.key) ? " on" : ""), type:"button", "aria-pressed": String(isSaved(it.key)),
+        "aria-label": (isSaved(it.key) ? "Remove " + it.name + " from saved items" : "Save " + it.name + " for next time"), onclick:() => toggleSaved(it)}, isSaved(it.key) ? "★" : "☆"),
       h("div", {class:"tog", role:"group", "aria-label":"Do you need " + it.name + "?"},
         h("button", {type:"button", class:"need", "aria-pressed": String(it.status === "need"), onclick:() => updItem(it.id, {status:"need"})}, "Need"),
         h("button", {type:"button", class:"have", "aria-pressed": String(it.status === "have"), onclick:() => updItem(it.id, {status:"have", got:false})}, "Have")),
       it.manual ? h("button", {class:"x", type:"button", "aria-label":"Remove " + it.name, onclick:() => { const g = clone(S.grocery); g.items = g.items.filter(i => i.id !== it.id); saveGrocery(g); }}, "×") : null));
 }
 const searchTerm = it => cleanName(it.name).toLowerCase();
+// Add a typed line ("2 lb bananas", "paper towels") to a copy of the list
+function addLineTo(g, v, category){
+  const p = parseLine(v) || {item:v};
+  const key = keyOf(p.item || v);
+  const it = g.items.find(i => i.key === key);
+  if (it){ it.status = "need"; it.got = false; it.manual = true; if (p.qty != null) it.parts.push({rid:"manual", title:"", qty:p.qty, unit:p.unit || ""}); }
+  else g.items.push({id:uid(), key, name:cap(cleanName(p.item || v)), category: category || categorize(p.item || v), parts: p.qty != null ? [{rid:"manual", title:"", qty:p.qty, unit:p.unit || ""}] : [], status:"need", got:false, manual:true});
+  return key;
+}
+/* ---------- saved items: things you buy often, one tap to put back on the list ---------- */
+const savedList = () => S.saved || [];
+const isSaved = key => savedList().some(x => x.key === key);
+function saveSaved(arr){
+  S.saved = arr; render();
+  if (S.mode === "db") house().collection("lists").doc("saved").set({items: clone(arr)}).catch(() => toast("Couldn't save that. Check your connection."));
+  else lsWrite();
+}
+function toggleSaved(it){
+  if (isSaved(it.key)){ saveSaved(savedList().filter(x => x.key !== it.key)); toast("Removed from saved items"); return; }
+  const manualAmt = totalAmount((it.parts || []).filter(p => p.rid === "manual"));
+  const line = (manualAmt && manualAmt !== "as needed" ? manualAmt + " " : "") + it.name;
+  saveSaved(savedList().concat([{key:it.key, name:it.name, line, category:it.category || "Other"}]));
+  toast("Saved " + it.name + " for next time");
+}
+const onListNow = key => S.grocery.items.some(i => i.key === key && i.status === "need" && !i.got);
+function addSaved(items){
+  const todo = items.filter(x => !onListNow(x.key));
+  if (!todo.length){ toast(items.length > 1 ? "Everything saved is already on the list" : "Already on the list"); return; }
+  const g = clone(S.grocery);
+  todo.forEach(x => addLineTo(g, x.line || x.name, x.category));
+  saveGrocery(g);
+  toast(todo.length > 1 ? "Added " + todo.length + " saved items" : "Added " + todo[0].name);
+}
+function savedBox(){
+  const list = savedList().slice().sort((a, b) => CATS.indexOf(a.category) - CATS.indexOf(b.category) || a.name.localeCompare(b.name));
+  return h("section", {class:"savedbox", "aria-label":"Saved items"},
+    h("div", {class:"lblrow"},
+      h("h3", null, "Saved items", list.length ? h("span", {class:"scount"}, String(list.length)) : null),
+      list.length ? h("div", {class:"row", style:"gap:6px"},
+        S.editSaved ? null : h("button", {class:"btn sm", type:"button", onclick:() => addSaved(list)}, "Add all"),
+        h("button", {class:"btn ghost sm", type:"button", "aria-pressed": String(!!S.editSaved), onclick:() => { S.editSaved = !S.editSaved; render(); }}, S.editSaved ? "Done" : "Edit")) : null),
+    list.length
+      ? h("div", {class:"schips"}, list.map(x => {
+          const on = onListNow(x.key);
+          return S.editSaved
+            ? h("span", {class:"schip editing"}, h("span", null, x.line || x.name),
+                h("button", {class:"x", type:"button", "aria-label":"Remove " + x.name + " from saved items", onclick:() => saveSaved(savedList().filter(y => y.key !== x.key))}, "×"))
+            : h("button", {class:"schip" + (on ? " on" : ""), type:"button", "aria-pressed": String(on), title: on ? "Already on the list" : "Add to the list",
+                onclick:() => addSaved([x])}, h("span", {class:"sicon", "aria-hidden":"true"}, on ? "✓" : "+"), h("span", null, x.line || x.name));
+        }))
+      : h("p", {class:"note", style:"margin:0"}, "Tap the ☆ on any item to save it here. Next time, one tap puts it back on the list."));
+}
 function addItemRow(){
   const submit = e => {
     e.preventDefault();
     const inp = $("#additem"), v = inp.value.trim(); if (!v) return;
-    const p = parseLine(v) || {item:v};
-    const g = clone(S.grocery), key = keyOf(p.item || v);
-    const it = g.items.find(i => i.key === key);
-    if (it){ it.status = "need"; it.got = false; it.manual = true; if (p.qty != null) it.parts.push({rid:"manual", title:"", qty:p.qty, unit:p.unit || ""}); }
-    else g.items.push({id:uid(), key, name:cap(cleanName(p.item || v)), category:categorize(p.item || v), parts: p.qty != null ? [{rid:"manual", title:"", qty:p.qty, unit:p.unit || ""}] : [], status:"need", got:false, manual:true});
+    const g = clone(S.grocery), key = addLineTo(g, v);
+    if (S.saveTyped && !isSaved(key)){
+      const it = g.items.find(i => i.key === key);
+      S.saved = savedList().concat([{key, name: it.name, line: v, category: it.category}]);
+      if (S.mode === "db") house().collection("lists").doc("saved").set({items: clone(S.saved)}).catch(() => {});
+    }
     inp.value = ""; saveGrocery(g);
   };
   return h("form", {class:"addrow", onsubmit:submit},
     h("label", {class:"sr", for:"additem"}, "Add an item"),
     h("input", {class:"in", id:"additem", placeholder:"Add an item, e.g. 2 lb bananas or paper towels", autocomplete:"off"}),
-    h("button", {class:"btn", type:"submit"}, "Add"));
+    h("button", {class:"btn", type:"submit"}, "Add"),
+    h("label", {class:"savechk"}, h("input", {type:"checkbox", id:"savetyped", checked: !!S.saveTyped, onchange:e => { S.saveTyped = e.target.checked; }}), "Also save for next time"));
 }
 function exportLines(need, style){
   const lines = [];
