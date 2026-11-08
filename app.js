@@ -8,6 +8,7 @@ const FB_READY = !!(window.firebase && FB.apiKey && !/PASTE/.test(FB.apiKey) && 
 const HOUSE = CFG.household || "gigi";
 const MODEL = CFG.claudeModel || "claude-sonnet-5-5";
 const KEY_LS = "plated-claude-key";
+const APP_VERSION = "13 · Nov 7";
 const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch(e){ return ""; } };
 const setKey = v => { try { v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS); } catch(e){} };
 
@@ -1180,7 +1181,8 @@ function settingsStep(sh, body, foot){
     h("div", {class:"kv"}, h("b", null, "Claude API key"),
       h("span", {class:"note"}, "Lets Plated read recipe card photos and messy recipe pages. Billed to an Anthropic API account (console.anthropic.com), separate from a Claude subscription. The key is saved on this device only; it is never put in the shared recipe box or on GitHub.")),
     h("input", {class:"in", id:"set-key", type:"password", autocomplete:"off", placeholder:"sk-ant-…", value: sh.keyDraft || "", oninput:e => { sh.keyDraft = e.target.value; }}),
-    getKey() ? h("p", {class:"note"}, "A key is saved on this device.") : h("p", {class:"note"}, "No key yet. Without one, pasted recipes are split by Plated itself and card photos can't be read."));
+    getKey() ? h("p", {class:"note"}, "A key is saved on this device.") : h("p", {class:"note"}, "No key yet. Without one, pasted recipes are split by Plated itself and card photos can't be read."),
+    h("p", {class:"note"}, "Plated version " + APP_VERSION));
   put(foot, 
     S.user ? h("button", {class:"btn ghost", type:"button", onclick:signOut, style:"margin-right:auto"}, "Sign out") : null,
     getKey() ? h("button", {class:"btn", type:"button", onclick:() => { setKey(""); sh.keyDraft = ""; toast("Key removed from this device"); render(); }}, "Remove key") : null,
@@ -1274,9 +1276,20 @@ async function runExtract(sh){
   const photo = sh.kind === "card" && sh.usePhoto;
   if (photo && !sh.files.length){ sh.error = "Add a photo of the card first."; render(); return; }
   if (!photo && !(sh.text || "").trim()){ sh.error = sh.kind === "card" ? "Paste the card's text first." : "Paste the recipe text first."; render(); return; }
-  const text = photo ? "" : unflatten(sh.text);
-  if (!photo && isPlated(text)){ applyDraft(sh, parsePlated(text)); return; }
-  if (!getKey()){ applyDraft(sh, localExtract(text)); return; }
+  let text = "";
+  try {
+    text = photo ? "" : unflatten(sh.text);
+    if (!photo && isPlated(text)){
+      const d = parsePlated(text);
+      // A Plated header but nothing usable under it: let the general splitter have a go
+      if (d.ingredients.length || d.steps.length){ applyDraft(sh, d); return; }
+    }
+    if (!getKey()){ applyDraft(sh, localExtract(text)); return; }
+  } catch(err){
+    console.error(err);
+    sh.error = "Plated couldn't read that paste (" + ((err && err.message) || err) + "). Send a screenshot of this to Tyler, or tap Back and try Typed in.";
+    render(); return;
+  }
   sh.busy = true; sh.ctl = new AbortController(); render();
   try {
     const data = await claudeJSON(extractPrompt(photo ? "card" : sh.kind === "card" ? "cardtext" : sh.kind, text), photo ? sh.files : [], sh.ctl.signal);
@@ -1356,7 +1369,7 @@ function unflatten(t){
 // Chat bots decorate headings with emoji ("🛒 Ingredients"); strip them before reading a line
 const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u{1F1E6}-\u{1F1FF}\uFE0F\u200D\u20E3]/gu;
 const deEmoji = t => String(t).replace(EMOJI_RE, "").replace(/[ \t\u00A0]{2,}/g, " ").replace(/^[ \t\u00A0]+|[ \t\u00A0]+$/gm, "").trim();
-const SIGNOFF = /^(enjoy|bon app|happy (cooking|baking|eating)|let me know|i hope|hope you|would you like|want me to|feel free to ask|if you('d| would) like|good luck)/i;
+const SIGNOFF = /^(enjoy|bon app|happy (cooking|baking|eating)|let me know|i hope|hope you|would you like|want me to|feel free to ask|if you('d| would) like|good luck|(want|need|do you want|would you want|should i|shall i|can i|i can also)\b.*\?\s*$)/i;
 const NOTES_HEAD = /^(notes?|tips?|chef'?s (notes?|tips?)|variations?|substitutions?|swaps?|serving suggestions?|storage|storing|make[- ]ahead|optional add[- ]ins|extras|faqs?|notes? (&|and) tips?|tips? (&|and) (variations?|tricks|notes?)|variations? (&|and) (tips?|swaps?))$/;
 // "| 3/4 cup | olive oil |" → "3/4 cup olive oil"; header and divider rows are dropped
 function tableRowToLine(l){
@@ -1367,7 +1380,11 @@ function tableRowToLine(l){
   const amt = cells.find(c => QTY_RE.test(normFracs(c))), rest = cells.filter(c => c !== amt);
   return deEmoji(amt ? [amt].concat(rest.slice(0, 1)).join(" ") + (rest.length > 1 ? ", " + rest.slice(1).join(", ") : "") : cells.join(", "));
 }
-function stripMd(t){ return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/^\s*```\w*\s*$/gm, "").replace(/\*\*|__|`/g, "").replace(/^\s*#{1,6}\s*/gm, ""); }
+function stripMd(t){
+  return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/^\s*```\w*\s*$/gm, "").replace(/\*\*|__|`/g, "").replace(/^\s*#{1,6}\s*/gm, "")
+    .replace(/(^|[\s(])[*_](?=\S)([^*_\n]*?\S)[*_](?=$|[\s.,;:!?)])/gm, "$1$2")   // *italic* and _italic_
+    .replace(/\\([\\`*_{}\[\]()#+\-.!>|~])/g, "$1");                              // markdown escapes like 1\. or \-
+}
 function isPlated(t){
   const s = deEmoji(stripMd(t));
   return /^\s*plated recipe\s*$/im.test(s) || (/^\s*title\s*:/im.test(s) && /^\s*ingredients\s*:\s*$/im.test(s) && /^\s*steps\s*:\s*$/im.test(s));
