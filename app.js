@@ -1353,9 +1353,23 @@ function unflatten(t){
     .replace(/(^|\s+)(\d{1,2})([.)])\s+(?=[A-Z])/g, (m, sp, n, d) => { if (+n === next){ next++; return "\n" + n + d + " "; } return m; })
     .replace(/\n{2,}/g, "\n").trim();
 }
+// Chat bots decorate headings with emoji ("🛒 Ingredients"); strip them before reading a line
+const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u{1F1E6}-\u{1F1FF}\uFE0F\u200D\u20E3]/gu;
+const deEmoji = t => String(t).replace(EMOJI_RE, "").replace(/[ \t\u00A0]{2,}/g, " ").replace(/^[ \t\u00A0]+|[ \t\u00A0]+$/gm, "").trim();
+const SIGNOFF = /^(enjoy|bon app|happy (cooking|baking|eating)|let me know|i hope|hope you|would you like|want me to|feel free to ask|if you('d| would) like|good luck)/i;
+const NOTES_HEAD = /^(notes?|tips?|chef'?s (notes?|tips?)|variations?|substitutions?|swaps?|serving suggestions?|storage|storing|make[- ]ahead|optional add[- ]ins|extras|faqs?|notes? (&|and) tips?|tips? (&|and) (variations?|tricks|notes?)|variations? (&|and) (tips?|swaps?))$/;
+// "| 3/4 cup | olive oil |" → "3/4 cup olive oil"; header and divider rows are dropped
+function tableRowToLine(l){
+  if (!/^\s*\|.*\|\s*$/.test(l)) return null;
+  const cells = l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.replace(/\*\*|__|`/g, "").trim()).filter(Boolean);
+  if (!cells.length || cells.every(c => /^:?-{2,}:?$/.test(c))) return "";
+  if (cells.some(c => /^(ingredients?|amounts?|quantity|qty|measure(ment)?s?|item|notes?)$/i.test(c)) && !cells.some(c => /\d/.test(c))) return "";
+  const amt = cells.find(c => QTY_RE.test(normFracs(c))), rest = cells.filter(c => c !== amt);
+  return deEmoji(amt ? [amt].concat(rest.slice(0, 1)).join(" ") + (rest.length > 1 ? ", " + rest.slice(1).join(", ") : "") : cells.join(", "));
+}
 function stripMd(t){ return String(t || "").replace(/[\u2018\u2019]/g, "'").replace(/^\s*```\w*\s*$/gm, "").replace(/\*\*|__|`/g, "").replace(/^\s*#{1,6}\s*/gm, ""); }
 function isPlated(t){
-  const s = stripMd(t);
+  const s = deEmoji(stripMd(t));
   return /^\s*plated recipe\s*$/im.test(s) || (/^\s*title\s*:/im.test(s) && /^\s*ingredients\s*:\s*$/im.test(s) && /^\s*steps\s*:\s*$/im.test(s));
 }
 function panFromText(v){
@@ -1375,14 +1389,20 @@ function parsePlated(text){
   const stepLines = [], notes = [];
   const blank = v => /^(\[.*\]|n\/a|none|unknown|—|-|blank)?$/i.test(v.trim());
   let sec = null;
-  for (const raw of stripMd(text).split(/\r?\n/)){
-    const l = raw.trim();
+  // If the whole chat was copied, the prompt's blank template comes first: read only the last PLATED RECIPE block
+  let body = stripMd(text);
+  const marks = [...body.matchAll(/^\s*plated recipe\s*$/gim)];
+  if (marks.length > 1) body = body.slice(marks[marks.length - 1].index);
+  for (const raw of body.split(/\r?\n/)){
+    const l = deEmoji(raw.trim());
     if (!l || /^plated recipe$/i.test(l)) continue;
+    if (SIGNOFF.test(l) || /^(here('s| is)|sure|absolutely|of course|certainly)\b.{0,80}(plated|format|recipe)[^.]*[:.!]?$/i.test(l)) continue;
     const hdr = l.toLowerCase().replace(/[:\s]+$/, "");
     if (/^ingredients?$/.test(hdr)){ sec = "ings"; continue; }
     if (/^(steps|instructions|directions|method)$/.test(hdr)){ sec = "steps"; continue; }
-    if (/^(notes?|tips)$/.test(hdr)){ sec = "notes"; continue; }
+    if (NOTES_HEAD.test(hdr)){ sec = "notes"; continue; }
     if (/^rules$/.test(hdr)){ sec = "skip"; continue; }
+    if (sec === "skip") continue;
     const f = !sec && l.match(/^(title|name|serves|servings|yield|prep(?:\s*time)?|cook(?:\s*time)?|bake(?:\s*time)?|total(?:\s*time)?|pan)\s*:\s*(.*)$/i);
     if (f){
       const k = f[1].toLowerCase(), v = f[2].trim();
@@ -1398,14 +1418,18 @@ function parsePlated(text){
     else if (sec === "steps") stepLines.push(l);
     else if (sec === "notes"){ const v = l.replace(/^[-–•*·]\s*/, "").trim(); if (v && !blank(v)) notes.push(v); }
   }
-  const numbered = stepLines.some(l => /^(step\s*)?\d+[.):]\s*/i.test(l));
   out.uses = [];
-  for (const l of stepLines){
+  // "1. Whisk the flour and milk. Adds: 1 cup flour" → step text and its Adds line
+  const lines2 = [];
+  stepLines.forEach(l => { const m = l.match(/^(.*?\S)\s+(adds?\s*:\s*.*)$/i); if (m && !/^[-–•*·]?\s*adds?\s*:/i.test(l)) lines2.push(m[1], m[2]); else lines2.push(l); });
+  const numbered = lines2.some(l => /^(step\s*)?\d+[.):]\s*/i.test(l));
+  for (const l of lines2){
     const ad = l.replace(/^[-–•*·]\s*/, "").match(/^(?:adds?|uses?|add in|ingredients?)\s*:\s*(.*)$/i);
     if (ad){ if (out.steps.length) out.uses[out.steps.length - 1] = blank(ad[1]) || /^none$/i.test(ad[1].trim()) ? "" : ad[1].trim(); continue; }
     const num = l.match(/^(?:step\s*)?\d+[.):]\s*(.*)$/i);
     const v = (num ? num[1] : l.replace(/^[-–•*·]\s*/, "")).trim();
     if (!v || blank(v)) continue;
+    if (!num && /^(serves|makes|yield)\b/i.test(v)) continue;
     if (!numbered || num || !out.steps.length) out.steps.push(v);
     else out.steps[out.steps.length - 1] = joinStep(out.steps[out.steps.length - 1], v);
   }
@@ -1424,7 +1448,7 @@ function findTimes(all, intro){
   const grab = (re, txt) => { const m = (txt || all).match(re); return m ? normTime(m[1]) : ""; };
   const t = {
     prep: grab(new RegExp("\\bprep(?:aration)?(?:\\s*time)?\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i")),
-    cook: grab(new RegExp("\\b(?:cook(?:ing)?|bake|baking)\\s*time\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i")),
+    cook: grab(new RegExp("\\b(?:cook(?:ing)?|bake|baking)(?:\\s*time\\s*[:\\-–]?|\\s*:)\\s*(?:about\\s*)?" + DUR, "i")),
     total: grab(new RegExp("\\btotal(?:\\s*time)?\\s*[:\\-–]?\\s*(?:about\\s*)?" + DUR, "i"))
   };
   if (!t.total && !t.cook) t.total = grab(new RegExp("\\b(?:about|around|roughly|takes|ready in|in about|in under|under|just)\\s+" + DUR, "i"), intro);
@@ -1432,7 +1456,7 @@ function findTimes(all, intro){
   return t;
 }
 function findServings(txt){
-  const m = txt.match(/\b(?:serves|servings?|yields?|makes|feeds)\b\s*[:\-–]?\s*(?:about\s*)?(\d+(?:\s*(?:–|-|to)\s*\d+)?)/i);
+  const m = txt.match(/\b(?:serves|servings?|yields?|makes|feeds)\b\s*[:\-–]?\s*(?:about\s*|around\s*|up to\s*)?(\d+(?:\s*(?:–|-|to)\s*\d+)?)(?!\s*(?:\/|cups?|c\.|tbsp|tablespoons?|tsp|teaspoons?|quarts?|qt|pints?|oz|ounces?|fl|lbs?|pounds?|liters?|litres?|ml|gallons?|grams?|g\b))/i);
   return m ? m[1].replace(/\s*(?:–|-|to)\s*/, "–") : "";
 }
 const SMALL_WORDS = new Set(["a","an","and","or","with","of","the","in","on","for","to","over","at","from","by","&"]);
@@ -1466,17 +1490,22 @@ function localExtract(text){
   const ings = [], steps = [], notes = [], intro = [], meta = [];
   for (let rawLine of src.split(/\r?\n/)){
     if (/^\s*```/.test(rawLine)) continue;
+    const tableLine = tableRowToLine(rawLine);
+    if (tableLine !== null){ if (tableLine){ if (!mode || mode === "i") { mode = "i"; ings.push(tableLine); } else if (mode === "s") steps.push(tableLine); } continue; }
+    if (rawLine.trim() && !deEmoji(rawLine.replace(/[#*_>`\-–•]/g, "")).trim()) continue;
     rawLine = rawLine.replace(/(\*\*|__)([^*_:]{2,50})(\*\*|__)\s*[–—-]\s+/, "$1$2:$3 ");
     const isHeading = /^\s*#{1,6}\s/.test(rawLine) || /^\s*(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/.test(rawLine);
     const boldOnly = /^\s*(?:(?:step\s*)?\d+[.):]\s*)?(\*\*|__)[^*_]+(\*\*|__)\s*:?\s*$/i.test(rawLine);
     const rawBullet = /^\s*[-–•*·]\s+/.test(rawLine) && !/^\s*\*\*/.test(rawLine);
     const rawIndent = /^(\s{2,}|\t)\S/.test(rawLine);
-    const l = rawLine.replace(/^\s*>+\s?/, "").replace(/^\s*#{1,6}\s*/, "").replace(/\*\*|__|`/g, "").trim();
+    const l = deEmoji(rawLine.replace(/^\s*>+\s?/, "").replace(/^\s*#{1,6}\s*/, "").replace(/\*\*|__|`/g, ""));
     if (!l || /^[-*_=]{3,}$/.test(l)) continue;
     const low = l.toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").replace(/[:\s.]+$/, "");
     if (/^(the )?ingredients?( list)?$|^(what )?you('ll| will)? need$|^shopping list$/.test(low)){ mode = "i"; continue; }
     if (/^(instructions|directions|method|preparation|steps|procedure|to make|how to make( it)?|how to)$/.test(low)){ mode = "s"; continue; }
-    if (/^(notes?|tips|chef'?s notes?|variations?|substitutions?|serving suggestions?|storage|make ahead|optional add-ins|extras)$/.test(low)){ mode = "n"; continue; }
+    if (NOTES_HEAD.test(low)){ mode = "n"; continue; }
+    if (/^(serves|servings?|makes|yields?|feeds)\b/i.test(l) && l.length < 60 && !QTY_RE.test(l)){ meta.push(l); continue; }
+    if (SIGNOFF.test(l)) continue;
     if (/^(serves|servings?|yields?|makes|prep(aration)?( time)?|cook(ing)? time|bake time|total( time)?|time|active time)\s*[:\-–]/i.test(l) && l.length < 80){ meta.push(l); continue; }
     if (CHATTY.test(l)){ if (!ings.length && !steps.length) intro.push({text:l, chatty:true}); continue; }
     if (isHeading && !mode && !mdTitle && !/:$/.test(l) && !ings.length){ mdTitle = l; continue; }
@@ -1528,7 +1557,7 @@ function localExtract(text){
   const allNotes = (introNotes.length ? [introNotes.join(" ")] : []).concat(notes);
   const pm = src.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")?\s*(?:pan|dish|baking)/i) || src.match(/(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)[\s-]*(?:inch|in\.?|")/i);
   const rm = src.match(/(\d+)[\s-]*(?:inch|in\.?|")\s*(?:round|cake pan|pie|skillet|springform|tube|bundt)/i);
-  return {title: name.replace(/^recipe:\s*/i, ""), serves, prepTime: times.prep, cookTime: times.cook, totalTime: times.total,
+  return {title: deEmoji(name).replace(/^recipe:\s*/i, "").replace(/\s*\((?:makes|serves|yields?|for)\b[^)]*\)\s*$/i, "").trim(), serves, prepTime: times.prep, cookTime: times.cook, totalTime: times.total,
     pan: pm ? {shape:"rect", width:+pm[1], length:+pm[2]} : rm ? {shape:"round", width:+rm[1], length:+rm[1]} : null,
     ingredients: ings.map(l => ({line:l, category:""})), steps, notes: allNotes.join("\n\n")};
 }
