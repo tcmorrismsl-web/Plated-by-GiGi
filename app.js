@@ -8,7 +8,7 @@ const FB_READY = !!(window.firebase && FB.apiKey && !/PASTE/.test(FB.apiKey) && 
 const HOUSE = CFG.household || "gigi";
 const MODEL = CFG.claudeModel || "claude-sonnet-5-5";
 const KEY_LS = "plated-claude-key";
-const APP_VERSION = "13 · Nov 7";
+const APP_VERSION = "14 · Nov 7";
 const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch(e){ return ""; } };
 const setKey = v => { try { v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS); } catch(e){} };
 
@@ -1352,19 +1352,25 @@ The recipe: use the one from this conversation, or the link, text or photo I add
 // Some copy and paste routes on iPhone drop every line break. Put them back before reading the recipe.
 function unflatten(t){
   t = String(t || "").replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n");
-  const lines = t.split("\n").filter(x => x.trim()).length;
-  if (lines >= 8 || t.length < 200) return t;
   let next = 1;
-  return t
-    .replace(/\s*\b(PLATED RECIPE)\b\s*/, "\n$1\n")
+  const HEADS = "Ingredients|INGREDIENTS|Steps|STEPS|Instructions|INSTRUCTIONS|Directions|DIRECTIONS|Method|Notes|NOTES|Tips";
+  const fix = l => ("\n" + l)
+    .replace(/\s*\b(PLATED RECIPE)\b:?\s*/, "\n$1\n")
     .replace(/\s+(?=(?:Title|Name|Serves|Servings|Yield|Prep time|Cook time|Total time|Pan)\s*:)/g, "\n")
-    .replace(/\s+(?=(?:Ingredients|INGREDIENTS|Steps|STEPS|Instructions|INSTRUCTIONS|Directions|DIRECTIONS|Method|Notes|NOTES|Tips)\s*:?\s)/g, "\n")
-    .replace(/(\n(?:Ingredients|INGREDIENTS|Steps|STEPS|Instructions|INSTRUCTIONS|Directions|DIRECTIONS|Method|Notes|NOTES|Tips)\s*:?)\s+/g, "$1\n")
+    .replace(new RegExp("\\s+(?=(?:" + HEADS + ")\\s*:?\\s)", "g"), "\n")
+    .replace(new RegExp("(\\n(?:" + HEADS + ")\\s*:?)[ \\t]+", "g"), "$1\n")
     .replace(/\s+(?=Adds\s*:)/g, "\n   ")
-    .replace(/\s+[-–•*▢]\s+(?=\S)/g, "\n- ")
+    .replace(/(?<=[^\d\s])\s+[-–•*▢]\s+(?=\S)/g, "\n- ")
     .replace(/\s+(?=For (?:the )?[A-Za-z][^:\n.]{1,40}:)/g, "\n")
     .replace(/(^|\s+)(\d{1,2})([.)])\s+(?=[A-Z])/g, (m, sp, n, d) => { if (+n === next){ next++; return "\n" + n + d + " "; } return m; })
-    .replace(/\n{2,}/g, "\n").trim();
+    .replace(/^\n+/, "");
+  // Repair only the lines that were squashed together; a paste can be part normal, part squashed
+  const squashed = l => new RegExp("^\\W{0,3}(?:" + HEADS + ")\\s*:\\s*\\S").test(l.trim()) || l.length > 60 && (
+    (l.match(/\b(?:Title|Serves|Servings|Prep time|Cook time|Total time|Pan)\s*:/g) || []).length >= 2 ||
+    /\bPLATED RECIPE\b:?\s+\S/.test(l) ||
+    (l.match(/\bAdds\s*:/g) || []).length >= 2 ||
+    (l.match(/(?<=[^\d\s])\s[-–•▢]\s(?=\S)/g) || []).length >= 2);
+  return t.split("\n").map(l => squashed(l) ? fix(l) : l).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 // Chat bots decorate headings with emoji ("🛒 Ingredients"); strip them before reading a line
 const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u{1F1E6}-\u{1F1FF}\uFE0F\u200D\u20E3]/gu;
@@ -1440,15 +1446,37 @@ function parsePlated(text){
   const lines2 = [];
   stepLines.forEach(l => { const m = l.match(/^(.*?\S)\s+(adds?\s*:\s*.*)$/i); if (m && !/^[-–•*·]?\s*adds?\s*:/i.test(l)) lines2.push(m[1], m[2]); else lines2.push(l); });
   const numbered = lines2.some(l => /^(step\s*)?\d+[.):]\s*/i.test(l));
-  for (const l of lines2){
+  let afterAdds = false;
+  for (let l of lines2){
     const ad = l.replace(/^[-–•*·]\s*/, "").match(/^(?:adds?|uses?|add in|ingredients?)\s*:\s*(.*)$/i);
-    if (ad){ if (out.steps.length) out.uses[out.steps.length - 1] = blank(ad[1]) || /^none$/i.test(ad[1].trim()) ? "" : ad[1].trim(); continue; }
+    if (ad){
+      let v = ad[1].trim(), tail = "";
+      const nm = v.match(/^(none|n\/a|nothing)[.;,]?\s+([A-Z].*)$/i);
+      if (nm){ v = nm[1]; tail = nm[2]; }
+      else {
+        // "…; 9 g salt Add the vegetable shortening and…": the next step was glued on after the last item
+        const cut = v.lastIndexOf(";") + 1, last = v.slice(cut), m = last.match(/[a-z0-9)%.,]\s+(?=[A-Z][a-z]+\b)/g);
+        if (m){
+          let pos = 0;
+          for (const piece of last.matchAll(/\s+(?=[A-Z][a-z]+\b)/g)){
+            const rest = last.slice(piece.index + piece[0].length);
+            if (piece.index > 0 && /[a-z0-9)%.,]$/.test(last.slice(0, piece.index)) && (STEP_VERB.test(rest) || MORE_VERBS.test(rest)) && rest.split(/\s+/).length >= 4){ pos = piece.index; break; }
+          }
+          if (pos){ tail = last.slice(pos).trim(); v = (v.slice(0, cut) + last.slice(0, pos)).trim(); }
+        }
+      }
+      if (out.steps.length) out.uses[out.steps.length - 1] = blank(v) || /^(none|n\/a|nothing)$/i.test(v) ? "" : v;
+      afterAdds = true;
+      if (tail){ out.steps.push(tail); afterAdds = false; }
+      continue;
+    }
     const num = l.match(/^(?:step\s*)?\d+[.):]\s*(.*)$/i);
     const v = (num ? num[1] : l.replace(/^[-–•*·]\s*/, "")).trim();
     if (!v || blank(v)) continue;
     if (!num && /^(serves|makes|yield)\b/i.test(v)) continue;
-    if (!numbered || num || !out.steps.length) out.steps.push(v);
+    if (!numbered || num || afterAdds || !out.steps.length) out.steps.push(v);
     else out.steps[out.steps.length - 1] = joinStep(out.steps[out.steps.length - 1], v);
+    afterAdds = false;
   }
   out.uses = out.steps.map((_, i) => out.uses[i] || "");
   out.notes = notes.join("\n\n");
@@ -1456,6 +1484,7 @@ function parsePlated(text){
 }
 
 /* Built-in splitter, used when there's no Claude key */
+const MORE_VERBS = /^(knead|arrange|divide|shape|pinch|flatten|punch|scoop|form|brush|set|allow|refrigerate|freeze|wrap|pat|fill|lay|press|bring|warm|rest|stack|assemble|discard|repeat|flip|pull|rinse|pour|stir in|make|prepare|lightly|gently|carefully|using|use)\b/i;
 const STEP_VERB = /^(cream|mix|stir|bake|combine|add|beat|whisk|pour|preheat|heat|cook|place|put|fold|blend|sift|grease|melt|let|cool|chill|serve|bring|simmer|boil|cut|chop|spread|roll|cover|remove|season|sprinkle|top|layer|drain|transfer|line|turn|reduce|fry|saut(e|é)|brown|knead|adjust|taste|toss|slice|dice|mince|garnish|finish|return|meanwhile|once|when|after|while|in a|in another)\b/i;
 const NOTE_START = /^(if (?!using\b)|tips?\b|notes?\b|variations?\b|swaps?\b|substitut|make[- ]ahead|leftovers?\b|storage\b|to store\b|store (it|leftovers)\b|serving suggestions?\b|serve (it )?with\b|pair (it )?with\b|for (a|an|extra|more|added|less|a lighter|a spicier)\b|to make (it|this)\b|want\b|craving\b|you can also\b|feel free\b|bonus\b|shortcut\b|optional:)/i;
 const CHATTY = /^(sure|here('s| is| are)|okay|ok\b|great|absolutely|of course|certainly|enjoy|let me know|i hope|hope you|happy (cooking|baking)|would you like|want me to|good luck|bon app)/i;
